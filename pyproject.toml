@@ -6,7 +6,7 @@ readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [
-    { name = "Henrique", email = "henrique.koga@olist.com" },
+    { name = "Henrique", email = "henrique.tkoga@gmail.com" },
 ]
 requires-python = ">=3.14"
 keywords = ["cli", "coding-agent", "local-first", "performance"]
