@@ -1,7 +1,5 @@
 """Collect and render local environment diagnostics."""
 
-from __future__ import annotations
-
 import re
 import shutil
 import subprocess
