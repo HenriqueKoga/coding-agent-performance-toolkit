@@ -22,37 +22,54 @@ CAPT is not a coding agent. Core features must work without an LLM API key, a ho
 
 ## System boundaries
 
-CAPT currently inspects the local runtime, not agent sessions.
-
 In scope today:
 
 - CLI entry points (`capt` and `python -m coding_agent_performance`)
 - Environment diagnostics for Python, Git, Claude Code, and Codex
+- A loopback-only OTLP HTTP/JSON receiver for Claude Code logs and metrics
+- Versioned JSONL envelopes on the local filesystem
 
 Out of scope today:
 
-- Trace import, normalization, or analysis
-- Persistence, databases, and HTTP APIs
-- Agent adapters, MCP, embeddings, semantic search, and Context Ledger
-- Reading agent config or session files
-- Telemetry, plugins, and remote services
+- Normalization of `resourceLogs` / `resourceMetrics`, session analysis, and insights
+- Reading Claude Code transcripts under `~/.claude/projects`
+- Databases, remote HTTP APIs, public network binds, TLS, gRPC, and protobuf
+- MCP, embeddings, semantic search, and Context Ledger
+- Telemetry from CAPT itself, plugins, and provider registries
 
 Cursor is intentionally omitted from diagnostics because it does not provide a stable CLI needed for this check.
 
+Remote services and public HTTP APIs remain out of scope. The OTLP receiver is a local, ephemeral ingestion boundary: it binds only to `127.0.0.1`, has no authentication surface for the internet, and is not a product API.
+
 ## Current architecture
 
-The first version is a small installable Python package:
+```text
+Claude Code
+    -> OTLP HTTP/JSON on loopback
+    -> CAPT local receiver
+    -> versioned raw envelope
+    -> local JSONL file
+```
+
+Package layout:
 
 ```text
 src/coding_agent_performance/
-    cli.py            Typer application and command rendering
-    diagnostics.py    Environment checks and report data
-    __main__.py       `python -m coding_agent_performance`
+    cli.py                         Top-level Typer app
+    diagnostics.py                 Environment checks
+    adapters/claude_code/telemetry.py   Export settings and shell snippet
+    trace/cli.py                   `capt trace` rendering and errors
+    trace/collector.py             OTLP HTTP/JSON receiver
+    trace/storage.py               Exclusive JSONL capture writer
 ```
 
-`diagnostics.py` collects typed results. `cli.py` renders them. Collection does not print, and rendering does not probe the environment. That split keeps the checks testable without exercising Typer internals or the machine's real tooling.
+The Claude Code adapter knows only how to describe official export configuration. It does not start Claude Code, edit `~/.claude/settings.json`, or parse events.
 
-Diagnostics use only the standard library: `sys.version_info`, `shutil.which`, and `subprocess.run` with a short timeout, captured output, and no `shell=True`. Python 3.14+ and Git are essential. Claude Code and Codex are optional; a missing optional tool is a warning, not a failure.
+The collector does not know Claude Code. It accepts `POST /v1/logs` and `POST /v1/metrics`, persists the JSON object as received, and counts successful batches. It does not interpret OTLP resource attributes.
+
+Storage writes one compact JSON line per HTTP request. Inner log records and metric data points stay nested inside `payload` until a later normalization PR.
+
+Diagnostics still use only the standard library. Collection uses the standard library HTTP server plus `platformdirs` for the user state directory.
 
 ## Future architecture
 
@@ -60,18 +77,21 @@ Later work should grow incrementally around a local domain model, not around ven
 
 Likely shape, kept high-level on purpose:
 
-1. **Ingestion.** Isolated adapters read vendor-specific session artifacts and emit a normalized trace representation.
-2. **Domain.** Deterministic analysis operates on that normalized model: redundant calls, loops, oversized outputs, and later a Context Ledger.
-3. **Search.** Code search optimized for LLM consumption, still local and independent of a hosted embedding service unless a later design explicitly justifies it.
-4. **Output.** Concise structured reports for humans and agents.
+1. **Ingestion.** Isolated adapters configure or read vendor-specific sources and emit raw captures. The Claude Code path is OTLP HTTP/JSON; other agents may differ.
+2. **Normalization.** A provider-independent layer turns raw envelopes into a shared session/trace model. That layer does not live inside the HTTP receiver.
+3. **Domain.** Deterministic analysis operates on the normalized model: redundant calls, loops, oversized outputs, and later a Context Ledger.
+4. **Search.** Code search optimized for LLM consumption, still local.
+5. **Output.** Concise structured reports for humans and agents.
 
-Vendor adapters must remain at the edge. Domain types, analysis, and CLI commands should not import Claude Code, Codex, or Cursor-specific formats.
+Vendor adapters must remain at the edge. The collector, storage format, and future domain types should not import Claude Code-specific event names.
 
-Packages such as `trace`, `context`, `search`, and `adapters` will be created only when they have a real implementation.
+Packages are created only when they have a real implementation. There is no generic provider registry in this version.
 
 ## Why not Django, PostgreSQL, Docker, or remote services
 
-This is a local developer CLI. A web framework, a server database, containers, and hosted APIs would add operational cost before there is a product need. SQLite or other local storage can be considered later if persistence becomes necessary. Until then, files on disk and in-memory data structures are enough.
+This is a local developer CLI. A web framework, a server database, containers, and hosted APIs would add operational cost before there is a product need. SQLite or other local storage can be considered later if persistence becomes necessary. Until then, JSONL files and in-memory counters are enough.
+
+The local OTLP receiver does not change that decision. It is not a web product, not a daemon, and not an externally reachable service.
 
 Remote services would also conflict with the privacy rule: session data and source code must not leave the machine.
 
@@ -79,17 +99,20 @@ Remote services would also conflict with the privacy rule: session data and sour
 
 - Prefer the filesystem and local processes over servers.
 - Keep the default workflow offline.
-- Treat network access as an explicit, later exception, never as a hidden dependency of core commands.
-- Isolate any future vendor-specific reader so removing or replacing it does not rewrite the domain.
+- Treat network access as an explicit exception. The collector listens on loopback only and makes no outbound requests.
+- Isolate vendor-specific export configuration so removing or replacing an adapter does not rewrite storage or future domain logic.
 
 ## Sensitive-data policy
 
-Traces, prompts, diffs, logs, and repository contents are confidential by default.
+Traces, prompts, diffs, logs, captures, and repository contents are confidential by default.
 
-- Do not read agent session files until a dedicated, reviewed ingestion feature exists.
-- Do not upload, phone home, or emit telemetry.
+- Do not read agent session files from `~/.claude/projects`.
+- Do not upload, phone home, or emit telemetry from CAPT.
 - Do not commit real traces, prompts, corporate logs, or unsanitized source snippets.
-- Future sample fixtures must be synthetic or explicitly sanitized.
+- Do not print OTLP payloads in the terminal.
+- Keep user prompts, assistant responses, tool details, and tool content disabled in the suggested Claude Code snippet.
+- Captures may still contain session identifiers, model names, account identity, working directories, tool names, and token/cost metrics. Treat them as sensitive.
+- Test fixtures must be synthetic.
 
 ## Splitting into other repositories
 

@@ -6,6 +6,7 @@ from typing import Annotated
 import typer
 
 from coding_agent_performance.diagnostics import collect_diagnostics, render_report
+from coding_agent_performance.trace.cli import trace_app
 
 app = typer.Typer(
     name="capt",
@@ -13,6 +14,7 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
 )
+app.add_typer(trace_app, name="trace")
 
 
 def package_version() -> str:

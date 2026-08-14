@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local CAPT captures if someone points --output inside the repository
+.capt/
