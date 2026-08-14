@@ -1,5 +1,6 @@
 import socket
 import threading
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -19,26 +20,27 @@ def _unused_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def test_trace_help() -> None:
-    result = runner.invoke(app, ["trace", "--help"])
+def test_trace_help(visible: Callable[[str], str]) -> None:
+    result = runner.invoke(app, ["trace", "--help"], color=False)
 
     assert result.exit_code == 0
-    assert "collect" in result.stdout
+    assert "collect" in visible(result.output)
 
 
-def test_trace_collect_help() -> None:
-    result = runner.invoke(app, ["trace", "collect", "--help"])
-
-    assert result.exit_code == 0
-    assert "claude-code" in result.stdout
-
-
-def test_trace_collect_claude_code_help() -> None:
-    result = runner.invoke(app, ["trace", "collect", "claude-code", "--help"])
+def test_trace_collect_help(visible: Callable[[str], str]) -> None:
+    result = runner.invoke(app, ["trace", "collect", "--help"], color=False)
 
     assert result.exit_code == 0
-    assert "--port" in result.stdout
-    assert "--output" in result.stdout
+    assert "claude-code" in visible(result.output)
+
+
+def test_trace_collect_claude_code_help(visible: Callable[[str], str]) -> None:
+    result = runner.invoke(app, ["trace", "collect", "claude-code", "--help"], color=False)
+    text = visible(result.output)
+
+    assert result.exit_code == 0
+    assert "--port" in text
+    assert "--output" in text
 
 
 def test_invalid_port_is_rejected(tmp_path: Path) -> None:
