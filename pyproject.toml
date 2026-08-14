@@ -1,0 +1,88 @@
+[project]
+name = "coding-agent-performance-toolkit"
+version = "0.1.0"
+description = "Local-first toolkit for measuring and improving coding-agent performance, context usage, and developer workflows."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Henrique", email = "henrique.tkoga@gmail.com" },
+]
+requires-python = ">=3.14"
+keywords = ["cli", "coding-agent", "local-first", "performance"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development",
+]
+dependencies = [
+    "typer>=0.27.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/HenriqueKoga/coding-agent-performance-toolkit"
+Repository = "https://github.com/HenriqueKoga/coding-agent-performance-toolkit"
+Issues = "https://github.com/HenriqueKoga/coding-agent-performance-toolkit/issues"
+
+[project.scripts]
+capt = "coding_agent_performance.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.12.0,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "coding_agent_performance"
+
+[tool.ruff]
+target-version = "py314"
+line-length = 120
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "B",
+    "E",
+    "F",
+    "I",
+    "RUF",
+    "SIM",
+    "UP",
+    "W",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["coding_agent_performance"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = [
+    "--cov=coding_agent_performance",
+    "--cov-report=term-missing",
+    "--cov-fail-under=90",
+]
+
+[tool.coverage.run]
+source = ["coding_agent_performance"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.ty.environment]
+python-version = "3.14"
+
+[tool.ty.src]
+include = ["src", "tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.16.3",
+    "ty>=0.0.72",
+]
