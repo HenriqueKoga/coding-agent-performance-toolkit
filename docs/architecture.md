@@ -205,3 +205,7 @@ Keep CAPT in one repository until a boundary is forced by real use. Consider a s
 - A library needs to be reused by another tool without pulling in the CLI.
 
 Until then, a single Python package with a small public CLI is the simpler and more honest design.
+
+## Architecture decisions
+
+Durable choices and trade-offs live in [decisions/README.md](decisions/README.md). This document describes the current structure; it does not replace those records.
