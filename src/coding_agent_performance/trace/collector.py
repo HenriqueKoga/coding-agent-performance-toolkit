@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Final
 
+from coding_agent_performance.trace.capture import parse_json
 from coding_agent_performance.trace.storage import CaptureStorageError, CaptureWriter, make_envelope
 
 LOOPBACK_HOST: Final = "127.0.0.1"
@@ -130,8 +131,8 @@ class _CollectorHandler(BaseHTTPRequestHandler):
             raise _HttpFailure(400, "incomplete request body")
         try:
             decoded = body.decode("utf-8")
-            parsed: object = json.loads(decoded)
-        except UnicodeDecodeError, json.JSONDecodeError:
+            parsed: object = parse_json(decoded)
+        except UnicodeDecodeError, json.JSONDecodeError, ValueError:
             raise _HttpFailure(400, "invalid JSON") from None
         if not isinstance(parsed, dict):
             raise _HttpFailure(400, "JSON payload must be an object")

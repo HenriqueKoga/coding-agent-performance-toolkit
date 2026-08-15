@@ -54,6 +54,7 @@ def render_text(summary: TraceSummary) -> str:
             f"  Log records:      {coverage.log_records}",
             f"  Metric points:    {coverage.metric_points}",
             f"  Unknown events:   {unknown_event_count}",
+            f"  Unknown OTLP values: {coverage.unknown_otlp_values}",
             f"  Warnings:         {len(coverage.warnings)}",
         ]
     )

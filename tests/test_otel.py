@@ -133,7 +133,7 @@ def test_invalid_any_value_shapes() -> None:
     assert decode_any_value(None)[1] == 1
     assert decode_any_value({"intValue": "nope"})[1] == 1
     assert decode_any_value({"doubleValue": True})[1] == 1
-    assert decode_any_value({"doubleValue": "1.5"})[1] == 1
+    assert decode_any_value({"doubleValue": "1.5"})[0] == 1.5
     assert decode_any_value({"bytesValue": 1})[1] == 1
     assert decode_any_value({"arrayValue": "bad"})[1] == 1
     assert decode_any_value({"kvlistValue": "bad"})[1] == 1
@@ -165,6 +165,36 @@ def test_bad_as_double_and_non_dict_point() -> None:
                             {
                                 "name": "m",
                                 "sum": {"aggregationTemporality": 1, "dataPoints": [{"asDouble": "nope"}, "x"]},
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+    assert decode_otlp("metrics", payload).metrics == ()
+
+
+def test_non_finite_double_values_are_unknown() -> None:
+    for raw in (float("nan"), float("inf"), float("-inf"), "NaN", "Infinity", "-Infinity"):
+        value, unknown = decode_any_value({"doubleValue": raw})
+        assert unknown == 1
+        assert value is not raw
+
+
+def test_non_finite_as_double_is_skipped() -> None:
+    payload: dict[str, object] = {
+        "resourceMetrics": [
+            {
+                "scopeMetrics": [
+                    {
+                        "metrics": [
+                            {
+                                "name": "m",
+                                "sum": {
+                                    "aggregationTemporality": 1,
+                                    "dataPoints": [{"asDouble": "Infinity"}, {"asDouble": float("nan")}],
+                                },
                             }
                         ]
                     }

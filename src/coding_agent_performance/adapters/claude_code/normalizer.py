@@ -164,6 +164,8 @@ def _cost_micros(attrs: dict[str, OtlpValue]) -> int:
         amount = Decimal(str(raw))
     except InvalidOperation:
         return 0
+    if not amount.is_finite():
+        return 0
     return int((amount * _MICROS_PER_USD).to_integral_value(rounding=ROUND_HALF_EVEN))
 
 

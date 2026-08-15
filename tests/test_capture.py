@@ -204,3 +204,33 @@ def test_error_includes_filename_and_line_but_not_payload(tmp_path: Path) -> Non
     assert "secret.jsonl:1" in message
     assert secret not in message
     assert "resourceLogs" not in message
+
+
+@pytest.mark.parametrize("token", ["NaN", "Infinity", "-Infinity"])
+def test_rejects_non_finite_json_constants(tmp_path: Path, token: str) -> None:
+    path = tmp_path / "nonfinite.jsonl"
+    path.write_text(
+        '{"schema_version":1,"received_at":"2026-08-15T10:00:00+00:00",'
+        '"source":"claude-code","signal":"logs",'
+        f'"payload":{{"resourceLogs":[{{"n":{token}}}]}}}}\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(CaptureError, match="invalid JSON") as exc_info:
+        list(CaptureReader(path))
+    message = str(exc_info.value)
+    assert "nonfinite.jsonl:1" in message
+    assert token not in message
+    assert "resourceLogs" not in message
+
+
+def test_rejects_overflow_float(tmp_path: Path) -> None:
+    path = tmp_path / "overflow.jsonl"
+    path.write_text(
+        '{"schema_version":1,"received_at":"2026-08-15T10:00:00+00:00",'
+        '"source":"claude-code","signal":"logs",'
+        '"payload":{"resourceLogs":[{"n":1e999}]}}\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(CaptureError, match="invalid JSON") as exc_info:
+        list(CaptureReader(path))
+    assert "1e999" not in str(exc_info.value)

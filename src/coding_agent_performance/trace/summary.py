@@ -104,7 +104,7 @@ class SessionStats:
 
 @dataclass(frozen=True, slots=True)
 class ModelUsage:
-    usage_source: Literal["api_request_events", "otel_metrics"]
+    usage_source: Literal["api_request_events", "otel_metrics", "none"]
     requests: int
     errors: int
     refusals: int
@@ -142,6 +142,7 @@ class CoverageStats:
     duplicate_log_records: int
     duplicate_metric_points: int
     unsupported_metric_points: int
+    unknown_otlp_values: int
     unknown_events: dict[str, int]
     unknown_metrics: dict[str, int]
     warnings: tuple[str, ...]
@@ -264,6 +265,7 @@ class TraceSummary:
                 "duplicate_log_records": self.coverage.duplicate_log_records,
                 "duplicate_metric_points": self.coverage.duplicate_metric_points,
                 "unsupported_metric_points": self.coverage.unsupported_metric_points,
+                "unknown_otlp_values": self.coverage.unknown_otlp_values,
                 "unknown_events": dict(sorted(self.coverage.unknown_events.items())),
                 "unknown_metrics": dict(sorted(self.coverage.unknown_metrics.items())),
                 "warnings": list(self.coverage.warnings),
@@ -293,6 +295,7 @@ class _ToolBucket:
     successes: int = 0
     failures: int = 0
     duration_ms_total: int = 0
+    duration_count: int = 0
     input_bytes: int = 0
     result_bytes: int = 0
 
@@ -346,6 +349,7 @@ class IncrementalSummarizer:
     _duplicate_logs: int = 0
     _duplicate_points: int = 0
     _unsupported: int = 0
+    _unknown_otlp_values: int = 0
     _unknown_events: dict[str, int] = field(default_factory=dict)
     _unknown_metrics: dict[str, int] = field(default_factory=dict)
     _warnings: list[str] = field(default_factory=list)
@@ -359,6 +363,7 @@ class IncrementalSummarizer:
         log_count: int,
         metric_count: int,
         unsupported: int,
+        unknown_otlp_values: int = 0,
     ) -> None:
         self._envelopes += 1
         self.source = envelope.source
@@ -373,6 +378,7 @@ class IncrementalSummarizer:
         self._log_records += log_count
         self._metric_points += metric_count
         self._unsupported += unsupported
+        self._unknown_otlp_values += unknown_otlp_values
         for record in records:
             self._ingest(record)
 
@@ -407,6 +413,7 @@ class IncrementalSummarizer:
                 duplicate_log_records=self._duplicate_logs,
                 duplicate_metric_points=self._duplicate_points,
                 unsupported_metric_points=self._unsupported,
+                unknown_otlp_values=self._unknown_otlp_values,
                 unknown_events=dict(sorted(self._unknown_events.items())),
                 unknown_metrics=dict(sorted(self._unknown_metrics.items())),
                 warnings=tuple(self._warnings),
@@ -482,16 +489,16 @@ class IncrementalSummarizer:
         result_bytes = record.result_size_bytes or 0
         self._tool_input_bytes += input_bytes
         self._tool_result_bytes += result_bytes
-        duration = record.duration_ms or 0
-        if record.duration_ms is not None:
-            self._tool_durations.append(record.duration_ms)
         bucket = self._tools.setdefault(record.tool_name, _ToolBucket())
         bucket.calls += 1
         if record.success:
             bucket.successes += 1
         else:
             bucket.failures += 1
-        bucket.duration_ms_total += duration
+        if record.duration_ms is not None:
+            self._tool_durations.append(record.duration_ms)
+            bucket.duration_ms_total += record.duration_ms
+            bucket.duration_count += 1
         bucket.input_bytes += input_bytes
         bucket.result_bytes += result_bytes
 
@@ -540,8 +547,9 @@ class IncrementalSummarizer:
                 by_query_source=self._event_query_rows(),
             )
         tokens, cost, by_model, by_query = self._metric_usage()
+        has_usage_metrics = any(key[0] in _USAGE_METRICS for key in self._series)
         return ModelUsage(
-            usage_source="otel_metrics",
+            usage_source="otel_metrics" if has_usage_metrics else "none",
             requests=0,
             errors=self._errors,
             refusals=self._refusals,
@@ -643,7 +651,9 @@ class IncrementalSummarizer:
                 failures=bucket.failures,
                 success_rate=(bucket.successes / bucket.calls) if bucket.calls else None,
                 duration_ms_total=bucket.duration_ms_total,
-                duration_ms_average=round(bucket.duration_ms_total / bucket.calls, 2) if bucket.calls else None,
+                duration_ms_average=(
+                    round(bucket.duration_ms_total / bucket.duration_count, 2) if bucket.duration_count else None
+                ),
                 input_bytes=bucket.input_bytes,
                 result_bytes=bucket.result_bytes,
             )
@@ -718,6 +728,7 @@ def summarize_capture(path: Path) -> TraceSummary:
             log_count=len(decoded.logs),
             metric_count=len(decoded.metrics),
             unsupported=decoded.unsupported_metric_points,
+            unknown_otlp_values=decoded.unknown_value_count,
         )
     return summarizer.finish(path)
 
@@ -774,9 +785,9 @@ def _resolved_value(series: _Series) -> int | float:
 
 
 def _is_newer(candidate: int | None, current: int | None) -> bool:
-    if current is None:
-        return True
     if candidate is None:
+        return current is None
+    if current is None:
         return True
     return candidate >= current
 
@@ -792,6 +803,8 @@ def _usd_to_micros(value: int | float) -> int:
     try:
         amount = Decimal(str(value))
     except InvalidOperation:
+        return 0
+    if not amount.is_finite():
         return 0
     return int((amount * Decimal("1000000")).to_integral_value(rounding=ROUND_HALF_EVEN))
 

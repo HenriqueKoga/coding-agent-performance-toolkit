@@ -48,6 +48,7 @@ Numbers are finite. Missing statistics use `null`, never `NaN` or `Infinity`.
 | --- | --- |
 | `api_request_events` | Tokens, cost, duration, and model totals come from `api_request` log events |
 | `otel_metrics` | No `api_request` events were present; totals fall back to `claude_code.token.usage` and `claude_code.cost.usage` |
+| `none` | No `api_request` events and no token or cost metric series were present |
 
 CAPT never adds event totals and metric totals together.
 
@@ -69,3 +70,6 @@ index = ceil(percentile * count) - 1
 `coverage.warnings` contains short, payload-free messages. Compatibility
 warnings do not fail the command when a reliable summary can still be produced.
 Unknown events and metrics are counted by name only.
+
+`coverage.unknown_otlp_values` counts `AnyValue` fields that could not be
+decoded. The original values are not included.

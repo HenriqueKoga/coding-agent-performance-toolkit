@@ -418,6 +418,190 @@ def test_lifecycle_and_empty_optional_fields() -> None:
     assert "n/a" in text
 
 
+def test_known_timestamp_wins_over_missing_when_known_is_first() -> None:
+    summarizer = IncrementalSummarizer(filename="ts.jsonl")
+    known = ActivityMeasurement(
+        name="claude_code.commit.count",
+        value=3,
+        unit="",
+        attributes={},
+        start_time_unix_nano=1,
+        time_unix_nano=10,
+        aggregation_temporality="cumulative",
+        kind="sum",
+    )
+    missing = ActivityMeasurement(
+        name="claude_code.commit.count",
+        value=99,
+        unit="",
+        attributes={},
+        start_time_unix_nano=1,
+        time_unix_nano=None,
+        aggregation_temporality="cumulative",
+        kind="sum",
+    )
+    summarizer.add(
+        _envelope("metrics", resource_metrics([])), (known, missing), log_count=0, metric_count=2, unsupported=0
+    )
+    assert summarizer.finish(Path("ts.jsonl")).activity.commits == 3
+
+
+def test_known_timestamp_wins_over_missing_when_missing_is_first() -> None:
+    summarizer = IncrementalSummarizer(filename="ts.jsonl")
+    missing = ActivityMeasurement(
+        name="claude_code.commit.count",
+        value=99,
+        unit="",
+        attributes={},
+        start_time_unix_nano=1,
+        time_unix_nano=None,
+        aggregation_temporality="cumulative",
+        kind="sum",
+    )
+    known = ActivityMeasurement(
+        name="claude_code.commit.count",
+        value=3,
+        unit="",
+        attributes={},
+        start_time_unix_nano=1,
+        time_unix_nano=10,
+        aggregation_temporality="cumulative",
+        kind="sum",
+    )
+    summarizer.add(
+        _envelope("metrics", resource_metrics([])), (missing, known), log_count=0, metric_count=2, unsupported=0
+    )
+    assert summarizer.finish(Path("ts.jsonl")).activity.commits == 3
+
+
+def test_tool_average_uses_only_observed_durations() -> None:
+    summarizer = IncrementalSummarizer(filename="tools.jsonl")
+    observed = ToolExecution(
+        session_id=None,
+        prompt_id=None,
+        tool_name="Bash",
+        success=True,
+        duration_ms=400,
+        input_size_bytes=1,
+        result_size_bytes=1,
+        error_type=None,
+        tool_use_id=None,
+        event_sequence=1,
+    )
+    missing = ToolExecution(
+        session_id=None,
+        prompt_id=None,
+        tool_name="Bash",
+        success=True,
+        duration_ms=None,
+        input_size_bytes=1,
+        result_size_bytes=1,
+        error_type=None,
+        tool_use_id=None,
+        event_sequence=2,
+    )
+    summarizer.add(
+        _envelope("logs", resource_logs([])), (observed, missing), log_count=2, metric_count=0, unsupported=0
+    )
+    bash = summarizer.finish(Path("tools.jsonl")).tools.by_name[0]
+    assert bash.calls == 2
+    assert bash.duration_ms_total == 400
+    assert bash.duration_ms_average == 400.0
+
+
+def test_unknown_otlp_values_are_accumulated_and_rendered() -> None:
+    summarizer = IncrementalSummarizer(filename="unknown.jsonl")
+    tool = ToolExecution(
+        session_id=None,
+        prompt_id=None,
+        tool_name="Read",
+        success=True,
+        duration_ms=1,
+        input_size_bytes=1,
+        result_size_bytes=1,
+        error_type=None,
+        tool_use_id=None,
+        event_sequence=1,
+    )
+    summarizer.add(
+        _envelope("logs", resource_logs([])),
+        (tool,),
+        log_count=1,
+        metric_count=0,
+        unsupported=0,
+        unknown_otlp_values=2,
+    )
+    summarizer.add(
+        _envelope("logs", resource_logs([])),
+        (),
+        log_count=0,
+        metric_count=0,
+        unsupported=0,
+        unknown_otlp_values=3,
+    )
+    summary = summarizer.finish(Path("unknown.jsonl"))
+    assert summary.coverage.unknown_otlp_values == 5
+    assert '"unknown_otlp_values": 5' in render_json(summary)
+    assert "Unknown OTLP values: 5" in render_text(summary)
+
+
+def test_unknown_any_value_reaches_coverage_without_content(tmp_path: Path) -> None:
+    payload: dict[str, object] = {
+        "resourceLogs": [
+            {
+                "scopeLogs": [
+                    {
+                        "logRecords": [
+                            {
+                                "attributes": [
+                                    {"key": "event.name", "value": {"stringValue": "user_prompt"}},
+                                    {"key": "prompt_length", "value": {"intValue": 1}},
+                                    {"key": "weird", "value": {"mysteryValue": "hidden-secret"}},
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+    path = tmp_path / "unknown-value.jsonl"
+    path.write_text(json.dumps(envelope(signal="logs", payload=payload)) + "\n", encoding="utf-8")
+    summary = summarize_capture(path)
+    assert summary.coverage.unknown_otlp_values == 1
+    assert "hidden-secret" not in render_json(summary)
+    assert "hidden-secret" not in render_text(summary)
+
+
+def test_usage_source_none_for_tools_only(tmp_path: Path) -> None:
+    payload = resource_logs(
+        [
+            {
+                "attributes": [
+                    {"key": "event.name", "value": {"stringValue": "tool_result"}},
+                    {"key": "tool_name", "value": {"stringValue": "Read"}},
+                    {"key": "success", "value": {"stringValue": "true"}},
+                    {"key": "duration_ms", "value": {"intValue": 10}},
+                ]
+            }
+        ]
+    )
+    path = tmp_path / "tools-only.jsonl"
+    path.write_text(json.dumps(envelope(signal="logs", payload=payload)) + "\n", encoding="utf-8")
+    summary = summarize_capture(path)
+    assert summary.model_usage.usage_source == "none"
+    assert summary.tools.calls == 1
+
+
+def test_usage_source_none_for_activity_metrics_only(tmp_path: Path) -> None:
+    payload = resource_metrics([sum_metric("claude_code.commit.count", [number_point(value=2)], temporality=1)])
+    path = tmp_path / "activity-only.jsonl"
+    path.write_text(json.dumps(envelope(signal="metrics", payload=payload)) + "\n", encoding="utf-8")
+    summary = summarize_capture(path)
+    assert summary.model_usage.usage_source == "none"
+    assert summary.activity.commits == 2
+
+
 def test_received_at_is_timezone_aware() -> None:
     summary = summarize_capture(FIXTURE_PATH)
     first = datetime.fromisoformat(summary.capture.first_received_at or "")

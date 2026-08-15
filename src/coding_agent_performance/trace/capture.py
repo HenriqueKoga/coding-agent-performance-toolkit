@@ -1,6 +1,7 @@
 """Streaming reader and shared schema for CAPT JSONL captures."""
 
 import json
+import math
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
@@ -42,6 +43,7 @@ class CaptureEnvelope:
                 "payload": self.payload,
             },
             ensure_ascii=False,
+            allow_nan=False,
             separators=(",", ":"),
         )
 
@@ -104,9 +106,34 @@ def _assert_readable_file(path: Path) -> None:
         raise CaptureError(path, detail) from exc
 
 
+def parse_json(text: str) -> object:
+    """Parse JSON and reject NaN, Infinity, and -Infinity."""
+    try:
+        parsed: object = json.loads(text, parse_constant=_reject_non_finite)
+    except ValueError as exc:
+        raise json.JSONDecodeError("non-finite number", "", 0) from exc
+    _reject_non_finite_tree(parsed)
+    return parsed
+
+
+def _reject_non_finite(_value: str) -> object:
+    raise ValueError("non-finite number")
+
+
+def _reject_non_finite_tree(value: object) -> None:
+    if isinstance(value, float) and not math.isfinite(value):
+        raise json.JSONDecodeError("non-finite number", "", 0)
+    if isinstance(value, dict):
+        for item in value.values():
+            _reject_non_finite_tree(item)
+    elif isinstance(value, list):
+        for item in value:
+            _reject_non_finite_tree(item)
+
+
 def _parse_envelope(path: Path, line: int, text: str) -> CaptureEnvelope:
     try:
-        parsed: object = json.loads(text)
+        parsed: object = parse_json(text)
     except json.JSONDecodeError:
         raise CaptureError(path, "invalid JSON", line=line) from None
     if not isinstance(parsed, dict):

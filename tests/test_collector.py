@@ -140,6 +140,19 @@ def test_invalid_content_length_returns_400(collector: OtlpHttpCollector) -> Non
     assert collector.writer.path.read_text(encoding="utf-8") == ""
 
 
+@pytest.mark.parametrize("token", [b"NaN", b"Infinity", b"-Infinity"])
+def test_non_finite_json_returns_400(collector: OtlpHttpCollector, token: bytes) -> None:
+    status, body = _post(
+        collector.logs_url, b'{"resourceLogs":[{"n":' + token + b"}]}", content_type="application/json"
+    )
+
+    assert status == 400
+    assert json.loads(body)["message"] == "invalid JSON"
+    assert token not in body
+    assert collector.writer.path.read_text(encoding="utf-8") == ""
+    assert collector.stats.log_batches == 0
+
+
 def test_invalid_json_returns_400(collector: OtlpHttpCollector) -> None:
     status, body = _post(collector.logs_url, b"{not-json", content_type="application/json")
 

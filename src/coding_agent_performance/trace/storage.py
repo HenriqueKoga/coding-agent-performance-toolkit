@@ -72,7 +72,10 @@ class CaptureWriter:
         return cls(resolved, file)
 
     def append(self, envelope: CaptureEnvelope) -> None:
-        line = envelope.to_json()
+        try:
+            line = envelope.to_json()
+        except TypeError, ValueError:
+            raise CaptureStorageError("Could not serialize capture envelope.") from None
         with self._lock:
             if self._closed:
                 raise CaptureStorageError("Capture file is closed.")

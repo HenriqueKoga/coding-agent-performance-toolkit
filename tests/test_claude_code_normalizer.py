@@ -64,6 +64,15 @@ def test_prefers_cost_micros_over_usd() -> None:
     assert record.estimated_cost_usd_micros == 12
 
 
+def test_non_finite_cost_usd_is_zero() -> None:
+    infinite = normalize_log(_log("api_request", model="m", cost_usd=float("inf")))
+    nan_text = normalize_log(_log("api_request", model="m", cost_usd="NaN"))
+    assert isinstance(infinite, ModelRequest)
+    assert infinite.estimated_cost_usd_micros == 0
+    assert isinstance(nan_text, ModelRequest)
+    assert nan_text.estimated_cost_usd_micros == 0
+
+
 def test_cost_fallback_uses_decimal() -> None:
     record = normalize_log(_log("api_request", model="m", cost_usd="0.012345"))
     assert isinstance(record, ModelRequest)

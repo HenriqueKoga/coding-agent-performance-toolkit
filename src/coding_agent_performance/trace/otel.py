@@ -4,6 +4,7 @@ This module understands OpenTelemetry JSON encoding only. It does not
 know Claude Code event names or any other vendor-specific schema.
 """
 
+import math
 from dataclasses import dataclass
 from typing import Final, Literal
 
@@ -92,9 +93,8 @@ def decode_any_value(value: object) -> tuple[OtlpValue | _UnknownValue, int]:
         parsed = _parse_int(raw)
         return (parsed, 0) if parsed is not None else (_UNKNOWN, 1)
     if kind == "doubleValue":
-        if isinstance(raw, bool) or not isinstance(raw, int | float):
-            return _UNKNOWN, 1
-        return float(raw), 0
+        parsed = _parse_finite_float(raw)
+        return (parsed, 0) if parsed is not None else (_UNKNOWN, 1)
     if kind == "bytesValue":
         return (OtlpBytes(encoded=raw), 0) if isinstance(raw, str) else (_UNKNOWN, 1)
     if kind == "arrayValue":
@@ -312,15 +312,22 @@ def _number_point_value(item: dict[str, object]) -> int | float | None:
     if "asInt" in item:
         return _parse_int(item.get("asInt"))
     if "asDouble" in item:
-        raw = item.get("asDouble")
-        if isinstance(raw, bool) or not isinstance(raw, int | float | str):
+        return _parse_finite_float(item.get("asDouble"))
+    return None
+
+
+def _parse_finite_float(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        parsed = float(value)
+        return parsed if math.isfinite(parsed) else None
+    if isinstance(value, str) and value:
+        try:
+            parsed = float(value)
+        except ValueError:
             return None
-        if isinstance(raw, str):
-            try:
-                return float(raw)
-            except ValueError:
-                return None
-        return float(raw)
+        return parsed if math.isfinite(parsed) else None
     return None
 
 
