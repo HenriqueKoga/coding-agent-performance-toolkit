@@ -50,12 +50,6 @@ _TOKEN_TYPES: Final = {
     "cache_creation": "cache_creation",
 }
 _USAGE_METRICS: Final = frozenset({"claude_code.token.usage", "claude_code.cost.usage"})
-_TOKEN_FIELDS: Final = {
-    "input": "input_tokens",
-    "output": "output_tokens",
-    "cache_read": "cache_read_tokens",
-    "cache_creation": "cache_creation_tokens",
-}
 
 type _SeriesKey = tuple[str, tuple[tuple[str, str], ...], int | None]
 
@@ -430,8 +424,15 @@ class IncrementalSummarizer:
                 model = attr_map.get("model")
                 if model:
                     bucket = models.setdefault(model, _ModelBucket())
-                    field_name = _TOKEN_FIELDS[token_type]
-                    setattr(bucket, field_name, getattr(bucket, field_name) + amount)
+                    match token_type:
+                        case "input":
+                            bucket.input_tokens += amount
+                        case "output":
+                            bucket.output_tokens += amount
+                        case "cache_read":
+                            bucket.cache_read_tokens += amount
+                        case "cache_creation":
+                            bucket.cache_creation_tokens += amount
                 query = attr_map.get("query_source")
                 if query:
                     queries.setdefault(query, _QueryBucket())

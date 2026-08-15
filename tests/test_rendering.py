@@ -117,6 +117,30 @@ def test_tool_table_fits_long_names() -> None:
     assert "Calls" in text
 
 
+def test_tool_table_truncates_names_over_width() -> None:
+    summarizer = IncrementalSummarizer(filename="tools.jsonl")
+    long_name = "ReadManyFilesWithAnOverlongSyntheticName"
+    tool = ToolExecution(
+        session_id=None,
+        prompt_id=None,
+        tool_name=long_name,
+        success=True,
+        duration_ms=25,
+        input_size_bytes=1,
+        result_size_bytes=1,
+        error_type=None,
+        tool_use_id=None,
+        event_sequence=1,
+    )
+    summarizer.add(_envelope("logs", resource_logs([])), (tool,), log_count=1, metric_count=0, unsupported=0)
+    summary = summarizer.finish(Path("tools.jsonl"))
+    text = render_text(summary)
+    truncated = f"{long_name[:21]}..."
+    assert truncated in text
+    assert long_name not in text
+    assert json.loads(render_json(summary))["tools"]["by_name"][0]["name"] == long_name
+
+
 def test_unknown_otlp_values_are_rendered() -> None:
     summarizer = IncrementalSummarizer(filename="unknown.jsonl")
     tool = ToolExecution(

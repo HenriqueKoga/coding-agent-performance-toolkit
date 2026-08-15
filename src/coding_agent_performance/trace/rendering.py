@@ -229,8 +229,14 @@ def _tool_table(rows: tuple[ToolBreakdown, ...]) -> str:
     for row in rows:
         rate = _percent(row.successes, row.calls)
         average = "n/a" if row.duration_ms_average is None else f"{row.duration_ms_average:.0f}ms"
-        lines.append(f"  {row.name:<{width}}{row.calls:>7}{rate:>9}{row.failures:>10}  {average}")
+        lines.append(f"  {_truncate(row.name, width):<{width}}{row.calls:>7}{rate:>9}{row.failures:>10}  {average}")
     return "\n".join(lines)
+
+
+def _truncate(value: str, width: int) -> str:
+    if len(value) <= width:
+        return value
+    return f"{value[: width - 3]}..."
 
 
 def _tool_name_width(rows: tuple[ToolBreakdown, ...]) -> int:

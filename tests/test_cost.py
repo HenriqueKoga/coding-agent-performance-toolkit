@@ -33,11 +33,5 @@ def test_invalid_types_are_zero() -> None:
     assert usd_to_micros({"usd": "0.1"}) == 0
 
 
-def test_errors_do_not_include_original_value() -> None:
-    secret = "1e999999-hidden-cost"
-    assert usd_to_micros(secret) == 0
-    try:
-        usd_to_micros(secret)
-    except Exception as exc:
-        assert secret not in str(exc)
-        assert secret not in repr(exc)
+def test_unparseable_value_is_zero() -> None:
+    assert usd_to_micros("1e999999-hidden-cost") == 0
