@@ -2,6 +2,7 @@ import json
 import socket
 import threading
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from coding_agent_performance.trace.collector import (
     MAX_BODY_BYTES,
     CollectorBindError,
     OtlpHttpCollector,
+    _Stats,
 )
 from coding_agent_performance.trace.storage import CaptureStorageError, CaptureWriter, make_envelope
 
@@ -136,6 +138,19 @@ def test_invalid_content_length_returns_400(collector: OtlpHttpCollector) -> Non
 
     assert "400" in _status_line(response)
     assert collector.writer.path.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.parametrize("token", [b"NaN", b"Infinity", b"-Infinity"])
+def test_non_finite_json_returns_400(collector: OtlpHttpCollector, token: bytes) -> None:
+    status, body = _post(
+        collector.logs_url, b'{"resourceLogs":[{"n":' + token + b"}]}", content_type="application/json"
+    )
+
+    assert status == 400
+    assert json.loads(body)["message"] == "invalid JSON"
+    assert token not in body
+    assert collector.writer.path.read_text(encoding="utf-8") == ""
+    assert collector.stats.log_batches == 0
 
 
 def test_invalid_json_returns_400(collector: OtlpHttpCollector) -> None:
@@ -289,6 +304,21 @@ def test_bind_error_when_port_in_use(tmp_path: Path) -> None:
     finally:
         writer.close()
         occupied.close()
+
+
+def test_stats_increments_are_thread_safe() -> None:
+    stats = _Stats()
+
+    def bump(_: int) -> None:
+        stats.increment("logs")
+        stats.increment("metrics")
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        list(pool.map(bump, range(500)))
+
+    snapshot = stats.snapshot()
+    assert snapshot.log_batches == 500
+    assert snapshot.metric_batches == 500
 
 
 def test_rejects_non_loopback_host(tmp_path: Path) -> None:

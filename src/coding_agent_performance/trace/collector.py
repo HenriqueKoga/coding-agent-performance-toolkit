@@ -6,10 +6,12 @@ OpenTelemetry Collector and must not be exposed on a network.
 
 import errno
 import json
+import threading
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Final
 
+from coding_agent_performance.trace.json_codec import InvalidJsonError, loads_json
 from coding_agent_performance.trace.storage import CaptureStorageError, CaptureWriter, make_envelope
 
 LOOPBACK_HOST: Final = "127.0.0.1"
@@ -35,17 +37,20 @@ class CollectorStats:
 
 class _Stats:
     def __init__(self) -> None:
+        self._lock = threading.Lock()
         self.log_batches = 0
         self.metric_batches = 0
 
     def increment(self, signal: str) -> None:
-        if signal == "logs":
-            self.log_batches += 1
-        elif signal == "metrics":
-            self.metric_batches += 1
+        with self._lock:
+            if signal == "logs":
+                self.log_batches += 1
+            elif signal == "metrics":
+                self.metric_batches += 1
 
     def snapshot(self) -> CollectorStats:
-        return CollectorStats(log_batches=self.log_batches, metric_batches=self.metric_batches)
+        with self._lock:
+            return CollectorStats(log_batches=self.log_batches, metric_batches=self.metric_batches)
 
 
 class _CollectorServer(ThreadingHTTPServer):
@@ -126,8 +131,8 @@ class _CollectorHandler(BaseHTTPRequestHandler):
             raise _HttpFailure(400, "incomplete request body")
         try:
             decoded = body.decode("utf-8")
-            parsed: object = json.loads(decoded)
-        except UnicodeDecodeError, json.JSONDecodeError:
+            parsed: object = loads_json(decoded)
+        except UnicodeDecodeError, InvalidJsonError:
             raise _HttpFailure(400, "invalid JSON") from None
         if not isinstance(parsed, dict):
             raise _HttpFailure(400, "JSON payload must be an object")

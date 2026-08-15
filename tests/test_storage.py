@@ -161,6 +161,27 @@ def test_prepare_directory_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         CaptureWriter.create(tmp_path / "nested" / "capture.jsonl")
 
 
+def test_to_json_rejects_non_finite_numbers() -> None:
+    envelope = make_envelope(source="claude-code", signal="logs", payload={"resourceLogs": [{"n": float("nan")}]})
+    with pytest.raises(ValueError, match="not JSON compliant"):
+        envelope.to_json()
+
+
+def test_writer_rejects_non_finite_without_leaking_payload(tmp_path: Path) -> None:
+    path = tmp_path / "capture.jsonl"
+    writer = CaptureWriter.create(path)
+    envelope = make_envelope(source="claude-code", signal="logs", payload={"resourceLogs": [{"n": float("inf")}]})
+    try:
+        with pytest.raises(CaptureStorageError, match="serialize") as exc_info:
+            writer.append(envelope)
+        message = str(exc_info.value)
+        assert "inf" not in message.lower()
+        assert "resourceLogs" not in message
+        assert path.read_text(encoding="utf-8") == ""
+    finally:
+        writer.close()
+
+
 def test_new_capture_path_shape(tmp_path: Path) -> None:
     path = new_capture_path(tmp_path, "claude-code")
     assert path.parent == tmp_path

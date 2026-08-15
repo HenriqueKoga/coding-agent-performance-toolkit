@@ -1,17 +1,16 @@
 """Local JSONL capture storage for raw OTLP envelopes."""
 
-import json
 import os
 import secrets
 import threading
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, TextIO
 
 from platformdirs import user_state_path
 
-SCHEMA_VERSION: Final = 1
+from coding_agent_performance.trace.capture import SCHEMA_VERSION, CaptureEnvelope
+
 _FILE_FLAGS: Final = os.O_CREAT | os.O_EXCL | os.O_WRONLY
 _DIR_MODE: Final = 0o700
 _FILE_MODE: Final = 0o600
@@ -19,28 +18,6 @@ _FILE_MODE: Final = 0o600
 
 class CaptureStorageError(Exception):
     """Expected failure while creating or writing a capture file."""
-
-
-@dataclass(frozen=True, slots=True)
-class CaptureEnvelope:
-    schema_version: int
-    received_at: datetime
-    source: str
-    signal: str
-    payload: dict[str, object]
-
-    def to_json(self) -> str:
-        return json.dumps(
-            {
-                "schema_version": self.schema_version,
-                "received_at": self.received_at.isoformat(),
-                "source": self.source,
-                "signal": self.signal,
-                "payload": self.payload,
-            },
-            ensure_ascii=False,
-            separators=(",", ":"),
-        )
 
 
 def default_captures_dir() -> Path:
@@ -95,7 +72,10 @@ class CaptureWriter:
         return cls(resolved, file)
 
     def append(self, envelope: CaptureEnvelope) -> None:
-        line = envelope.to_json()
+        try:
+            line = envelope.to_json()
+        except TypeError, ValueError:
+            raise CaptureStorageError("Could not serialize capture envelope.") from None
         with self._lock:
             if self._closed:
                 raise CaptureStorageError("Capture file is closed.")

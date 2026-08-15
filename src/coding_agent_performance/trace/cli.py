@@ -1,12 +1,14 @@
-"""Trace collection commands."""
+"""Trace collection and summary commands."""
 
-from contextlib import suppress
+import sys
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from coding_agent_performance.adapters.claude_code.telemetry import SOURCE, ClaudeCodeExportConfig
+from coding_agent_performance.trace.capture import CaptureError
 from coding_agent_performance.trace.collector import (
     DEFAULT_PORT,
     LOOPBACK_HOST,
@@ -14,16 +16,18 @@ from coding_agent_performance.trace.collector import (
     CollectorStats,
     OtlpHttpCollector,
 )
+from coding_agent_performance.trace.rendering import render_json, render_text
 from coding_agent_performance.trace.storage import (
     CaptureStorageError,
     CaptureWriter,
     default_captures_dir,
     new_capture_path,
 )
+from coding_agent_performance.trace.summary import summarize_capture
 
 trace_app = typer.Typer(
     name="trace",
-    help="Collect coding-agent telemetry locally.",
+    help="Collect and summarize coding-agent telemetry.",
     no_args_is_help=True,
     add_completion=False,
 )
@@ -34,6 +38,39 @@ collect_app = typer.Typer(
     add_completion=False,
 )
 trace_app.add_typer(collect_app, name="collect")
+
+
+class OutputFormat(StrEnum):
+    TEXT = "text"
+    JSON = "json"
+
+
+@trace_app.command("summarize")
+def summarize(
+    capture: Annotated[
+        Path,
+        typer.Argument(help="CAPT JSONL capture file."),
+    ],
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--format", help="Summary output format."),
+    ] = OutputFormat.TEXT,
+) -> None:
+    """Summarize a local CAPT capture without sending data anywhere."""
+    try:
+        summary = summarize_capture(capture)
+    except CaptureError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from None
+    except OSError as exc:
+        detail = exc.strerror or str(exc) or "read error"
+        typer.echo(f"Invalid capture at {capture.name}: {detail}", err=True)
+        raise typer.Exit(1) from None
+    if output_format is OutputFormat.JSON:
+        sys.stdout.write(render_json(summary))
+        sys.stdout.write("\n")
+        return
+    typer.echo(render_text(summary))
 
 
 @collect_app.command("claude-code")
@@ -72,10 +109,20 @@ def collect_claude_code(
 
     config = ClaudeCodeExportConfig(logs_endpoint=collector.logs_url, metrics_endpoint=collector.metrics_url)
     typer.echo(render_started(collector.writer.path, collector.logs_url, collector.metrics_url, config.shell_snippet()))
-    with suppress(KeyboardInterrupt):
+    serve_error: str | None = None
+    try:
         serve_collector(collector)
-    stats = collector.close()
+    except KeyboardInterrupt:
+        pass
+    except Exception:
+        # Serving is a process boundary: never leak request bodies or a traceback.
+        serve_error = "Collector failed while serving."
+    finally:
+        stats = collector.close()
     typer.echo(render_stopped(collector.writer.path, stats))
+    if serve_error is not None:
+        typer.echo(serve_error, err=True)
+        raise typer.Exit(1)
 
 
 def serve_collector(collector: OtlpHttpCollector) -> None:
