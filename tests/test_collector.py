@@ -2,6 +2,7 @@ import json
 import socket
 import threading
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from coding_agent_performance.trace.collector import (
     MAX_BODY_BYTES,
     CollectorBindError,
     OtlpHttpCollector,
+    _Stats,
 )
 from coding_agent_performance.trace.storage import CaptureStorageError, CaptureWriter, make_envelope
 
@@ -289,6 +291,21 @@ def test_bind_error_when_port_in_use(tmp_path: Path) -> None:
     finally:
         writer.close()
         occupied.close()
+
+
+def test_stats_increments_are_thread_safe() -> None:
+    stats = _Stats()
+
+    def bump(_: int) -> None:
+        stats.increment("logs")
+        stats.increment("metrics")
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        list(pool.map(bump, range(500)))
+
+    snapshot = stats.snapshot()
+    assert snapshot.log_batches == 500
+    assert snapshot.metric_batches == 500
 
 
 def test_rejects_non_loopback_host(tmp_path: Path) -> None:

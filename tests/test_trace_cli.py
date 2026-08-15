@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 from coding_agent_performance.cli import app
 from coding_agent_performance.trace.cli import serve_collector
 from coding_agent_performance.trace.collector import LOOPBACK_HOST, OtlpHttpCollector
-from coding_agent_performance.trace.storage import CaptureWriter
+from coding_agent_performance.trace.storage import CaptureWriter, make_envelope
 
 runner = CliRunner()
 
@@ -24,7 +24,9 @@ def test_trace_help(visible: Callable[[str], str]) -> None:
     result = runner.invoke(app, ["trace", "--help"], color=False)
 
     assert result.exit_code == 0
-    assert "collect" in visible(result.output)
+    text = visible(result.output)
+    assert "collect" in text
+    assert "summarize" in text
 
 
 def test_trace_collect_help(visible: Callable[[str], str]) -> None:
@@ -127,6 +129,26 @@ def test_keyboard_interrupt_returns_zero(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert result.exit_code == 0
     assert "Collector stopped" in result.stdout
     assert "Traceback" not in result.output
+
+
+def test_unexpected_serve_error_keeps_partial_capture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def boom(collector: OtlpHttpCollector) -> None:
+        collector.writer.append(make_envelope(source="claude-code", signal="logs", payload={"resourceLogs": []}))
+        raise RuntimeError("secret payload should not appear")
+
+    monkeypatch.setattr("coding_agent_performance.trace.cli.serve_collector", boom)
+    output = tmp_path / "partial.jsonl"
+    result = runner.invoke(
+        app,
+        ["trace", "collect", "claude-code", "--port", str(_unused_port()), "--output", str(output)],
+    )
+
+    assert result.exit_code == 1
+    assert "Collector failed while serving." in result.output
+    assert "Traceback" not in result.output
+    assert "secret payload" not in result.output
+    assert output.exists()
+    assert "resourceLogs" in output.read_text(encoding="utf-8")
 
 
 def test_serve_collector_blocks_until_stop(tmp_path: Path) -> None:

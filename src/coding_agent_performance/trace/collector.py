@@ -6,6 +6,7 @@ OpenTelemetry Collector and must not be exposed on a network.
 
 import errno
 import json
+import threading
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Final
@@ -35,17 +36,20 @@ class CollectorStats:
 
 class _Stats:
     def __init__(self) -> None:
+        self._lock = threading.Lock()
         self.log_batches = 0
         self.metric_batches = 0
 
     def increment(self, signal: str) -> None:
-        if signal == "logs":
-            self.log_batches += 1
-        elif signal == "metrics":
-            self.metric_batches += 1
+        with self._lock:
+            if signal == "logs":
+                self.log_batches += 1
+            elif signal == "metrics":
+                self.metric_batches += 1
 
     def snapshot(self) -> CollectorStats:
-        return CollectorStats(log_batches=self.log_batches, metric_batches=self.metric_batches)
+        with self._lock:
+            return CollectorStats(log_batches=self.log_batches, metric_batches=self.metric_batches)
 
 
 class _CollectorServer(ThreadingHTTPServer):
