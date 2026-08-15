@@ -68,14 +68,18 @@ src/coding_agent_performance/
     diagnostics.py                      Environment checks
     adapters/claude_code/telemetry.py   Export settings and shell snippet
     adapters/claude_code/normalizer.py  Allowlist mapping onto domain records
-    trace/cli.py                        `capt trace` rendering and errors
+    trace/cli.py                        `capt trace` arguments, errors, and exit codes
     trace/collector.py                  OTLP HTTP/JSON receiver
     trace/storage.py                    Exclusive JSONL capture writer
     trace/capture.py                    Shared envelope schema and streaming reader
+    trace/json_codec.py                 Strict JSON parsing for collector and reader
     trace/otel.py                       Generic OTLP HTTP/JSON decoder
-    trace/model.py                      Provider-neutral summary records
-    trace/summary.py                    Incremental aggregation
-    trace/render.py                     Text and JSON renderers
+    trace/records.py                    Provider-neutral normalized records
+    trace/report.py                     Immutable summary DTOs
+    trace/cost.py                       Safe USD to microdollar conversion
+    trace/aggregation.py                Incremental summarizer and statistics
+    trace/summary.py                    Capture-to-summary use case
+    trace/rendering.py                  Allowlist JSON dict plus text/JSON output
 ```
 
 The Claude Code adapter knows official export configuration and how to map Claude Code log and metric names onto small domain records. It does not start Claude Code, edit `~/.claude/settings.json`, or keep prompt, response, or tool content.
@@ -125,7 +129,7 @@ Cost prefers `cost_usd_micros`. If that field is absent, `cost_usd` is converted
 
 ## Provider-neutral records
 
-Domain records live in `trace/model.py`. They carry only the fields required for aggregation. After normalization, the full OTLP attribute map is gone.
+Domain records live in `trace/records.py`. They carry only the fields required for aggregation. After normalization, the full OTLP attribute map is gone. The finished report lives in `trace/report.py` and does not contain mutable maps.
 
 ## Incremental summarizer
 

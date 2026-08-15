@@ -205,6 +205,37 @@ def test_non_finite_as_double_is_skipped() -> None:
     assert decode_otlp("metrics", payload).metrics == ()
 
 
+def test_overflow_double_value_is_unknown() -> None:
+    value, unknown = decode_any_value({"doubleValue": 10**400})
+    assert unknown == 1
+    assert not isinstance(value, float)
+
+
+def test_overflow_as_double_is_skipped() -> None:
+    payload: dict[str, object] = {
+        "resourceMetrics": [
+            {
+                "scopeMetrics": [
+                    {
+                        "metrics": [
+                            {
+                                "name": "m",
+                                "sum": {
+                                    "aggregationTemporality": 1,
+                                    "dataPoints": [{"asDouble": 10**400}],
+                                },
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+    decoded = decode_otlp("metrics", payload)
+    assert decoded.metrics == ()
+    assert decoded.unknown_value_count == 1
+
+
 def test_temporality_names_and_numbers() -> None:
     assert normalize_temporality(1) == "delta"
     assert normalize_temporality(2) == "cumulative"

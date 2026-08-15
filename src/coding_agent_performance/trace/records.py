@@ -1,6 +1,11 @@
 """Provider-neutral records used by the incremental summarizer."""
 
 from dataclasses import dataclass
+from typing import Literal
+
+type MetricKind = Literal["sum", "gauge"]
+type AggregationTemporality = Literal["delta", "cumulative"]
+type MetricAttributes = tuple[tuple[str, str], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,11 +72,11 @@ class ActivityMeasurement:
     name: str
     value: int | float
     unit: str
-    attributes: dict[str, str]
+    attributes: MetricAttributes
     start_time_unix_nano: int | None
     time_unix_nano: int | None
-    aggregation_temporality: str | None
-    kind: str
+    aggregation_temporality: AggregationTemporality | None
+    kind: MetricKind
 
 
 @dataclass(frozen=True, slots=True)

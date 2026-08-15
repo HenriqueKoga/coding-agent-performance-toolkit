@@ -16,7 +16,7 @@ from coding_agent_performance.trace.collector import (
     CollectorStats,
     OtlpHttpCollector,
 )
-from coding_agent_performance.trace.render import render_json, render_text
+from coding_agent_performance.trace.rendering import render_json, render_text
 from coding_agent_performance.trace.storage import (
     CaptureStorageError,
     CaptureWriter,
@@ -115,6 +115,7 @@ def collect_claude_code(
     except KeyboardInterrupt:
         pass
     except Exception:
+        # Serving is a process boundary: never leak request bodies or a traceback.
         serve_error = "Collector failed while serving."
     finally:
         stats = collector.close()

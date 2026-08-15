@@ -1,5 +1,6 @@
 from coding_agent_performance.adapters.claude_code.normalizer import normalize_log, normalize_logs, normalize_metric
-from coding_agent_performance.trace.model import (
+from coding_agent_performance.trace.otel import OtlpLogRecord, OtlpMetricPoint, OtlpValue
+from coding_agent_performance.trace.records import (
     ActivityMeasurement,
     AssistantResponse,
     ModelRequest,
@@ -10,7 +11,6 @@ from coding_agent_performance.trace.model import (
     UnknownMetric,
     UserPrompt,
 )
-from coding_agent_performance.trace.otel import OtlpLogRecord, OtlpMetricPoint, OtlpValue
 from tests.helpers.synthetic_capture import (
     BASH_COMMAND,
     EMAIL,
@@ -166,8 +166,8 @@ def test_metric_allowlist_drops_identity() -> None:
         )
     )
     assert isinstance(record, ActivityMeasurement)
-    assert record.attributes == {"type": "input", "model": "claude-example"}
-    assert SESSION not in record.attributes.values()
+    assert record.attributes == (("model", "claude-example"), ("type", "input"))
+    assert SESSION not in dict(record.attributes).values()
 
 
 def test_normalize_logs_and_lifecycle_events() -> None:
@@ -183,6 +183,12 @@ def test_normalize_logs_and_lifecycle_events() -> None:
     assert isinstance(records[1], NamedLifecycleEvent)
     assert isinstance(records[2], UnknownEvent)
     assert records[2].name == "unnamed"
+
+
+def test_extreme_cost_usd_is_zero() -> None:
+    record = normalize_log(_log("api_request", model="m", cost_usd="1e999999"))
+    assert isinstance(record, ModelRequest)
+    assert record.estimated_cost_usd_micros == 0
 
 
 def test_cost_and_coercion_edges() -> None:

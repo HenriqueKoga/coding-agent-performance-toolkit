@@ -1,13 +1,16 @@
 """Allowlist normalizer for Claude Code OTLP records."""
 
 from collections.abc import Iterable
-from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation
 from typing import Final
 
-from coding_agent_performance.trace.model import (
+from coding_agent_performance.trace.cost import usd_to_micros
+from coding_agent_performance.trace.otel import DecodedOtlp, OtlpLogRecord, OtlpMetricPoint, OtlpValue
+from coding_agent_performance.trace.records import (
     ActivityMeasurement,
+    AggregationTemporality,
     AssistantResponse,
     DomainRecord,
+    MetricAttributes,
     ModelRequest,
     ModelRequestError,
     NamedLifecycleEvent,
@@ -16,7 +19,6 @@ from coding_agent_performance.trace.model import (
     UnknownMetric,
     UserPrompt,
 )
-from coding_agent_performance.trace.otel import DecodedOtlp, OtlpLogRecord, OtlpMetricPoint, OtlpValue
 
 _LIFECYCLE_EVENTS: Final = frozenset(
     {
@@ -36,7 +38,6 @@ _KNOWN_METRICS: Final = {
     "claude_code.code_edit_tool.decision": ("tool_name", "decision", "language"),
     "claude_code.active_time.total": ("type",),
 }
-_MICROS_PER_USD: Final = Decimal("1000000")
 
 
 def normalize_decoded(decoded: DecodedOtlp) -> tuple[DomainRecord, ...]:
@@ -57,56 +58,56 @@ def normalize_log(record: OtlpLogRecord) -> DomainRecord:
     session_id = _optional_str(attrs.get("session.id"))
     prompt_id = _optional_str(attrs.get("prompt.id"))
     sequence = _as_int(attrs.get("event.sequence"))
-    name = record.event_name
-    if name == "api_request":
-        return _model_request(attrs, session_id, prompt_id, sequence)
-    if name == "api_error":
-        return ModelRequestError(
-            session_id=session_id,
-            prompt_id=prompt_id,
-            model=_optional_str(attrs.get("model")),
-            status_code=_as_int(attrs.get("status_code")),
-            duration_ms=_as_int(attrs.get("duration_ms")),
-            attempt_count=_as_int(attrs.get("attempt")),
-            query_source=_optional_str(attrs.get("query_source")),
-            event_sequence=sequence,
-        )
-    if name == "tool_result":
-        return _tool_execution(attrs, session_id, prompt_id, sequence)
-    if name == "user_prompt":
-        return UserPrompt(
-            session_id=session_id,
-            prompt_id=prompt_id,
-            prompt_length=_as_int(attrs.get("prompt_length")),
-            event_sequence=sequence,
-        )
-    if name == "assistant_response":
-        return AssistantResponse(
-            session_id=session_id,
-            prompt_id=prompt_id,
-            model=_optional_str(attrs.get("model")),
-            query_source=_optional_str(attrs.get("query_source")),
-            response_length=_as_int(attrs.get("response_length")),
-            event_sequence=sequence,
-        )
-    if name in _LIFECYCLE_EVENTS:
-        return NamedLifecycleEvent(name=name, session_id=session_id, event_sequence=sequence)
-    return UnknownEvent(name=name or "unnamed", session_id=session_id, event_sequence=sequence)
+    match record.event_name:
+        case "api_request":
+            return _model_request(attrs, session_id, prompt_id, sequence)
+        case "api_error":
+            return ModelRequestError(
+                session_id=session_id,
+                prompt_id=prompt_id,
+                model=_optional_str(attrs.get("model")),
+                status_code=_as_int(attrs.get("status_code")),
+                duration_ms=_as_int(attrs.get("duration_ms")),
+                attempt_count=_as_int(attrs.get("attempt")),
+                query_source=_optional_str(attrs.get("query_source")),
+                event_sequence=sequence,
+            )
+        case "tool_result":
+            return _tool_execution(attrs, session_id, prompt_id, sequence)
+        case "user_prompt":
+            return UserPrompt(
+                session_id=session_id,
+                prompt_id=prompt_id,
+                prompt_length=_as_int(attrs.get("prompt_length")),
+                event_sequence=sequence,
+            )
+        case "assistant_response":
+            return AssistantResponse(
+                session_id=session_id,
+                prompt_id=prompt_id,
+                model=_optional_str(attrs.get("model")),
+                query_source=_optional_str(attrs.get("query_source")),
+                response_length=_as_int(attrs.get("response_length")),
+                event_sequence=sequence,
+            )
+        case name if name in _LIFECYCLE_EVENTS:
+            return NamedLifecycleEvent(name=name, session_id=session_id, event_sequence=sequence)
+        case name:
+            return UnknownEvent(name=name or "unnamed", session_id=session_id, event_sequence=sequence)
 
 
 def normalize_metric(point: OtlpMetricPoint) -> DomainRecord:
     allowed = _KNOWN_METRICS.get(point.name)
     if allowed is None:
         return UnknownMetric(name=point.name)
-    attributes = {key: value for key in allowed if (value := _optional_str(point.attributes.get(key))) is not None}
     return ActivityMeasurement(
         name=point.name,
         value=point.value,
         unit=point.unit,
-        attributes=attributes,
+        attributes=_allowed_attributes(point, allowed),
         start_time_unix_nano=point.start_time_unix_nano,
         time_unix_nano=point.time_unix_nano,
-        aggregation_temporality=point.aggregation_temporality,
+        aggregation_temporality=_metric_temporality(point.aggregation_temporality),
         kind=point.kind,
     )
 
@@ -160,13 +161,18 @@ def _cost_micros(attrs: dict[str, OtlpValue]) -> int:
     raw = attrs.get("cost_usd")
     if raw is None:
         return 0
-    try:
-        amount = Decimal(str(raw))
-    except InvalidOperation:
-        return 0
-    if not amount.is_finite():
-        return 0
-    return int((amount * _MICROS_PER_USD).to_integral_value(rounding=ROUND_HALF_EVEN))
+    return usd_to_micros(raw)
+
+
+def _allowed_attributes(point: OtlpMetricPoint, allowed: tuple[str, ...]) -> MetricAttributes:
+    selected = ((key, value) for key in allowed if (value := _optional_str(point.attributes.get(key))) is not None)
+    return tuple(sorted(selected))
+
+
+def _metric_temporality(value: str | None) -> AggregationTemporality | None:
+    if value == "delta" or value == "cumulative":
+        return value
+    return None
 
 
 def _optional_str(value: object) -> str | None:

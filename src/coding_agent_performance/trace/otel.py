@@ -288,9 +288,9 @@ def _decode_data_point(
 ) -> tuple[OtlpMetricPoint | None, int]:
     if not isinstance(item, dict):
         return None, 0
-    value = _number_point_value(item)
+    value, unknown_value = _number_point_value(item)
     if value is None:
-        return None, 0
+        return None, unknown_value
     attributes, unknown = decode_attributes(item.get("attributes"))
     merged = {**resource_attrs, **attributes}
     return (
@@ -304,28 +304,27 @@ def _decode_data_point(
             aggregation_temporality=temporality,
             kind=kind,
         ),
-        unknown,
+        unknown + unknown_value,
     )
 
 
-def _number_point_value(item: dict[str, object]) -> int | float | None:
+def _number_point_value(item: dict[str, object]) -> tuple[int | float | None, int]:
     if "asInt" in item:
-        return _parse_int(item.get("asInt"))
+        parsed = _parse_int(item.get("asInt"))
+        return (parsed, 0) if parsed is not None else (None, 1)
     if "asDouble" in item:
-        return _parse_finite_float(item.get("asDouble"))
-    return None
+        parsed = _parse_finite_float(item.get("asDouble"))
+        return (parsed, 0) if parsed is not None else (None, 1)
+    return None, 0
 
 
 def _parse_finite_float(value: object) -> float | None:
     if isinstance(value, bool):
         return None
-    if isinstance(value, int | float):
-        parsed = float(value)
-        return parsed if math.isfinite(parsed) else None
-    if isinstance(value, str) and value:
+    if isinstance(value, int | float) or (isinstance(value, str) and value):
         try:
             parsed = float(value)
-        except ValueError:
+        except ValueError, OverflowError:
             return None
         return parsed if math.isfinite(parsed) else None
     return None
