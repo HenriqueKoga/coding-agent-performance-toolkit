@@ -1,0 +1,147 @@
+name: Agent task
+description: Define a reviewable and executable task for a coding agent.
+title: "[Agent Task] "
+labels:
+  - needs:design
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Write a self-contained specification. An implementation agent will not have guaranteed access to external chats, notes, or unlinked documents.
+
+        Acceptance criteria must be observable and verifiable. Links may add context, but they cannot replace the required fields below.
+
+        Do not include secrets, credentials, private captures, or other sensitive data.
+
+        Field IDs are a future automation contract. Do not rename them without an explicit compatibility decision.
+
+        Lifecycle (manual until automation exists):
+
+        ```text
+        needs:design
+        → needs:human-review
+        → agent:ready
+        → agent:working
+        → needs:human-review
+        → merged/closed
+        ```
+
+        Use `agent:blocked` when the task cannot continue. Only a human may apply `agent:ready`.
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Describe the current situation and the problem to solve. Include the facts an agent needs without relying on an external conversation.
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: State the desired outcome. Do not prescribe unnecessary implementation details.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      description: List objective, observable, and testable checks. Use a Markdown list.
+      placeholder: |
+        - [ ]
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of scope
+      description: State what must not be implemented in this task.
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints
+      description: Record technical, product, compatibility, privacy, or architecture limits that the agent must preserve.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation
+      description: List the exact commands and checks that must be run before delivery.
+      placeholder: |
+        uv sync --frozen --all-groups
+        uv run ruff format --check .
+        uv run ruff check .
+        uv run ty check
+        uv run pytest
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Optional related issues, pull requests, pending decisions, or known blockers.
+    validations:
+      required: false
+  - type: dropdown
+    id: risk
+    attributes:
+      label: Risk
+      description: This selection does not add a label automatically. Before moving the issue to `agent:ready`, a human must apply exactly one matching `risk:*` label.
+      options:
+        - Low
+        - Medium
+        - High
+    validations:
+      required: true
+  - type: dropdown
+    id: privacy
+    attributes:
+      label: Privacy
+      description: Declare the privacy or sensitive-data impact of this task.
+      options:
+        - No privacy or sensitive-data impact
+        - Potential privacy or sensitive-data impact
+        - Confirmed privacy or sensitive-data impact
+    validations:
+      required: true
+  - type: dropdown
+    id: compatibility
+    attributes:
+      label: Compatibility
+      description: Declare the compatibility impact of this task.
+      options:
+        - No compatibility impact
+        - Backward-compatible behavior change
+        - Potentially breaking change
+    validations:
+      required: true
+  - type: textarea
+    id: human_decisions
+    attributes:
+      label: Human decisions
+      description: Optional decisions that a person must make before or during implementation.
+    validations:
+      required: false
+  - type: checkboxes
+    id: ready_checklist
+    attributes:
+      label: Ready checklist
+      description: Confirm the specification is complete enough for human review. This does not mark the issue `agent:ready`.
+      options:
+        - label: The context is sufficient without relying on an external conversation.
+          required: true
+        - label: The goal is clear.
+          required: true
+        - label: The acceptance criteria are verifiable.
+          required: true
+        - label: Out of scope is explicit.
+          required: true
+        - label: Validation is defined.
+          required: true
+        - label: Secrets and sensitive data are not included.
+          required: true
+        - label: Risks and impacts are declared.
+          required: true
