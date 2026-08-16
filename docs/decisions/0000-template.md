@@ -1,6 +1,4 @@
-# ADR template
-
-Copy this file to `NNNN-short-title.md`, replace `NNNN` with the next number, and fill in every section.
+<!-- Copy this file to NNNN-short-title.md and replace the placeholders. -->
 
 # ADR NNNN: Title
 
