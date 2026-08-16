@@ -143,6 +143,14 @@ uv run capt trace collect claude-code --help
 uv run capt trace summarize --help
 ```
 
+Project documents:
+
+- [AGENTS.md](AGENTS.md) — how agents should work in this repository
+- [docs/product.md](docs/product.md) — product intent and direction
+- [docs/architecture.md](docs/architecture.md) — system structure
+- [docs/development.md](docs/development.md) — setup, workflow, and delivery
+- [docs/decisions/README.md](docs/decisions/README.md) — architecture decisions
+
 ## Roadmap
 
 Planned incrementally, without dates or delivery promises:
