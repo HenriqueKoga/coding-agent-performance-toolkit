@@ -20,7 +20,9 @@ from coding_agent_performance.trace.rendering import render_json, render_text
 from coding_agent_performance.trace.storage import (
     CaptureStorageError,
     CaptureWriter,
+    LatestCaptureError,
     default_captures_dir,
+    latest_capture,
     new_capture_path,
 )
 from coding_agent_performance.trace.summary import summarize_capture
@@ -48,29 +50,50 @@ class OutputFormat(StrEnum):
 @trace_app.command("summarize")
 def summarize(
     capture: Annotated[
-        Path,
+        Path | None,
         typer.Argument(help="CAPT JSONL capture file."),
-    ],
+    ] = None,
+    latest: Annotated[
+        bool,
+        typer.Option("--latest", help="Summarize the newest capture in the default capture directory."),
+    ] = False,
     output_format: Annotated[
         OutputFormat,
         typer.Option("--format", help="Summary output format."),
     ] = OutputFormat.TEXT,
 ) -> None:
     """Summarize a local CAPT capture without sending data anywhere."""
+    selected = resolve_summarize_capture(capture, latest=latest)
     try:
-        summary = summarize_capture(capture)
+        summary = summarize_capture(selected)
     except CaptureError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from None
     except OSError as exc:
         detail = exc.strerror or str(exc) or "read error"
-        typer.echo(f"Invalid capture at {capture.name}: {detail}", err=True)
+        typer.echo(f"Invalid capture at {selected.name}: {detail}", err=True)
         raise typer.Exit(1) from None
     if output_format is OutputFormat.JSON:
         sys.stdout.write(render_json(summary))
         sys.stdout.write("\n")
         return
     typer.echo(render_text(summary))
+
+
+def resolve_summarize_capture(capture: Path | None, *, latest: bool) -> Path:
+    if capture is not None and latest:
+        typer.echo("Provide either a capture path or --latest, not both.", err=True)
+        raise typer.Exit(1) from None
+    if latest:
+        try:
+            return latest_capture(default_captures_dir())
+        except LatestCaptureError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1) from None
+    if capture is None:
+        typer.echo("Provide a capture path or --latest.", err=True)
+        raise typer.Exit(1) from None
+    return capture
 
 
 @collect_app.command("claude-code")

@@ -48,6 +48,7 @@ uv run capt --version
 uv run capt doctor
 uv run capt trace collect claude-code
 uv run capt trace summarize path/to/capture.jsonl
+uv run capt trace summarize --latest
 ```
 
 `capt doctor` checks essential tools (Python 3.14+ and Git) and optional coding-agent CLIs (Claude Code and Codex). Missing optional tools produce warnings and do not fail the command. Cursor is not checked yet because it does not expose a stable CLI for this diagnosis.
@@ -114,6 +115,9 @@ Tokens, cost, duration, and model totals come from `api_request` events when at 
 The summary is an allowlist. Session, prompt, message, request, account, and organization identifiers are omitted. Prompt text, assistant text, errors, tool inputs, parameters, commands, and paths are omitted. The raw capture file remains sensitive and local.
 
 ```bash
+uv run capt trace summarize --latest
+uv run capt trace summarize --latest --format json
+
 uv run capt trace summarize ~/.local/state/capt/captures/example.jsonl
 
 uv run capt trace summarize \
@@ -121,7 +125,7 @@ uv run capt trace summarize \
   --format json
 ```
 
-`--format text` is the default. `--format json` writes only JSON to stdout. See [docs/summary-format.md](docs/summary-format.md) for the pre-alpha JSON contract.
+`--latest` summarizes the newest eligible `.jsonl` file in the default capture directory. Provide either `--latest` or an explicit path, not both. `--format text` is the default. `--format json` writes only JSON to stdout. See [docs/summary-format.md](docs/summary-format.md) for the pre-alpha JSON contract.
 
 ## Troubleshooting
 
