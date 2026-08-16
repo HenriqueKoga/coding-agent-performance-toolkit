@@ -70,7 +70,7 @@ src/coding_agent_performance/
     adapters/claude_code/normalizer.py  Allowlist mapping onto domain records
     trace/cli.py                        `capt trace` arguments, errors, and exit codes
     trace/collector.py                  OTLP HTTP/JSON receiver
-    trace/storage.py                    Exclusive JSONL capture writer
+    trace/storage.py                    Exclusive JSONL capture writer and latest-capture selection
     trace/capture.py                    Shared envelope schema and streaming reader
     trace/json_codec.py                 Strict JSON parsing for collector and reader
     trace/otel.py                       Generic OTLP HTTP/JSON decoder
@@ -86,7 +86,7 @@ The Claude Code adapter knows official export configuration and how to map Claud
 
 The collector does not know Claude Code. It accepts `POST /v1/logs` and `POST /v1/metrics`, persists the JSON object as received, and counts successful batches. It does not interpret OTLP resource attributes.
 
-Storage writes one compact JSON line per HTTP request. The reader validates those envelopes in streaming mode and never loads the whole file.
+Storage writes one compact JSON line per HTTP request. The reader validates those envelopes in streaming mode and never loads the whole file. `capt trace summarize` accepts an explicit path or `--latest`, which selects the newest eligible `.jsonl` file in the default capture directory without following symbolic links.
 
 The OTLP decoder understands `AnyValue`, `resourceLogs`, and `resourceMetrics` only. It does not import the Claude Code adapter.
 

@@ -20,6 +20,10 @@ class CaptureStorageError(Exception):
     """Expected failure while creating or writing a capture file."""
 
 
+class LatestCaptureError(Exception):
+    """Expected failure while selecting the newest local capture."""
+
+
 def default_captures_dir() -> Path:
     return user_state_path("capt", appauthor=False) / "captures"
 
@@ -27,6 +31,42 @@ def default_captures_dir() -> Path:
 def new_capture_path(directory: Path, prefix: str) -> Path:
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     return directory / f"{prefix}-{timestamp}-{secrets.token_hex(3)}.jsonl"
+
+
+def latest_capture(directory: Path) -> Path:
+    try:
+        if not directory.exists():
+            raise LatestCaptureError("Default capture directory does not exist.")
+        if not directory.is_dir():
+            raise LatestCaptureError("Default capture path is not a directory.")
+        selected = _select_latest_capture(directory)
+    except LatestCaptureError:
+        raise
+    except OSError as exc:
+        detail = exc.strerror or str(exc) or "read error"
+        raise LatestCaptureError(f"Could not read default capture directory: {detail}") from exc
+    if selected is None:
+        raise LatestCaptureError("No capture files found in the default capture directory.")
+    return selected
+
+
+def _select_latest_capture(directory: Path) -> Path | None:
+    best: tuple[int, str] | None = None
+    selected: Path | None = None
+    with os.scandir(directory) as entries:
+        for entry in entries:
+            if not _is_eligible_capture(entry):
+                continue
+            stat_result = entry.stat(follow_symlinks=False)
+            key = (stat_result.st_mtime_ns, entry.name)
+            if best is None or key > best:
+                best = key
+                selected = directory / entry.name
+    return selected
+
+
+def _is_eligible_capture(entry: os.DirEntry[str]) -> bool:
+    return entry.name.endswith(".jsonl") and not entry.is_symlink() and entry.is_file(follow_symlinks=False)
 
 
 def make_envelope(*, source: str, signal: str, payload: dict[str, object]) -> CaptureEnvelope:

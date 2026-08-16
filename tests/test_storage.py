@@ -11,7 +11,9 @@ from coding_agent_performance.trace.storage import (
     SCHEMA_VERSION,
     CaptureStorageError,
     CaptureWriter,
+    LatestCaptureError,
     default_captures_dir,
+    latest_capture,
     make_envelope,
     new_capture_path,
 )
@@ -189,3 +191,79 @@ def test_new_capture_path_shape(tmp_path: Path) -> None:
     assert path.name.endswith(".jsonl")
     assert "T" in path.name
     assert path.name.endswith("Z-" + path.name.rsplit("-", 1)[1])
+
+
+def _touch_capture(directory: Path, name: str, mtime_ns: int) -> Path:
+    path = directory / name
+    path.write_text("{}\n", encoding="utf-8")
+    os.utime(path, ns=(mtime_ns, mtime_ns))
+    return path
+
+
+def test_latest_capture_selects_highest_mtime(tmp_path: Path) -> None:
+    older = _touch_capture(tmp_path, "older.jsonl", 1_000)
+    newer = _touch_capture(tmp_path, "newer.jsonl", 2_000)
+    _touch_capture(tmp_path, "notes.txt", 3_000)
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    _touch_capture(nested, "hidden.jsonl", 4_000)
+    (tmp_path / "dir.jsonl").mkdir()
+
+    selected = latest_capture(tmp_path)
+
+    assert selected == newer
+    assert selected != older
+
+
+def test_latest_capture_tie_breaks_by_filename(tmp_path: Path) -> None:
+    _touch_capture(tmp_path, "alpha.jsonl", 5_000)
+    winner = _touch_capture(tmp_path, "zeta.jsonl", 5_000)
+
+    assert latest_capture(tmp_path) == winner
+
+
+def test_latest_capture_missing_directory(tmp_path: Path) -> None:
+    missing = tmp_path / "captures"
+    with pytest.raises(LatestCaptureError, match="does not exist") as exc_info:
+        latest_capture(missing)
+    assert str(missing) not in str(exc_info.value)
+    assert "{}" not in str(exc_info.value)
+
+
+def test_latest_capture_empty_directory(tmp_path: Path) -> None:
+    with pytest.raises(LatestCaptureError, match="No capture files") as exc_info:
+        latest_capture(tmp_path)
+    assert str(tmp_path) not in str(exc_info.value)
+
+
+def test_latest_capture_rejects_non_directory(tmp_path: Path) -> None:
+    path = tmp_path / "not-a-dir"
+    path.write_text("payload-should-not-leak\n", encoding="utf-8")
+    with pytest.raises(LatestCaptureError, match="not a directory") as exc_info:
+        latest_capture(path)
+    assert "payload-should-not-leak" not in str(exc_info.value)
+    assert str(path) not in str(exc_info.value)
+
+
+def test_latest_capture_oserror(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_scandir(_path: Path) -> object:
+        raise OSError("permission denied")
+
+    monkeypatch.setattr("coding_agent_performance.trace.storage.os.scandir", fail_scandir)
+    with pytest.raises(LatestCaptureError, match="Could not read default capture directory") as exc_info:
+        latest_capture(tmp_path)
+    assert "permission denied" in str(exc_info.value)
+    assert str(tmp_path) not in str(exc_info.value)
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlink support required")
+def test_latest_capture_excludes_symlinks(tmp_path: Path) -> None:
+    real = _touch_capture(tmp_path, "real.jsonl", 1_000)
+    link = tmp_path / "newer-link.jsonl"
+    try:
+        link.symlink_to(real)
+    except OSError:
+        pytest.skip("symbolic links are not supported")
+    os.utime(link, ns=(2_000, 2_000), follow_symlinks=False)
+
+    assert latest_capture(tmp_path) == real
