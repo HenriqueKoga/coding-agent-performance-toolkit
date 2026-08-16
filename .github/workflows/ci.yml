@@ -7,7 +7,7 @@ on:
       - main
 
 jobs:
-  check:
+  quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -30,5 +30,67 @@ jobs:
       - name: Type check
         run: uv run ty check
 
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: "3.14"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-groups
+
       - name: Test
         run: uv run pytest
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: "3.14"
+          enable-cache: true
+
+      - name: Build package
+        run: uv build --clear
+
+      - name: Install built wheel and smoke-test capt
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          sdists=(dist/*.tar.gz)
+          if [[ ${#wheels[@]} -ne 1 || ${#sdists[@]} -ne 1 ]]; then
+            echo "expected exactly one wheel and one sdist in dist/"
+            ls -la dist || true
+            exit 1
+          fi
+          venv="${RUNNER_TEMP}/capt-pkg"
+          uv venv --python 3.14 "$venv"
+          uv pip install --python "$venv" "${wheels[0]}"
+          capt_bin="$venv/bin/capt"
+          if [[ ! -x "$capt_bin" ]]; then
+            echo "installed wheel did not provide capt"
+            exit 1
+          fi
+          "$venv/bin/python" -c "
+          import coding_agent_performance
+          from pathlib import Path
+          installed = Path(coding_agent_performance.__file__).resolve()
+          venv = Path(r'''$venv''').resolve()
+          checkout = Path.cwd().resolve()
+          print(f'installed={installed}')
+          if not installed.is_relative_to(venv):
+              raise SystemExit('package was not imported from the isolated venv')
+          if installed.is_relative_to(checkout / 'src'):
+              raise SystemExit('package was imported from the source checkout')
+          "
+          "$capt_bin" --help
+          "$capt_bin" --version
