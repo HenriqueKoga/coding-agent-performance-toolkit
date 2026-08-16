@@ -37,6 +37,8 @@ Resolve conflicts in this order:
 7. [docs/development.md](docs/development.md)
 8. Behavior shown by current tests and code
 
+If documentation conflicts with established public behavior or tests, treat it as a potential documentation drift and stop before changing behavior.
+
 If a relevant contradiction remains, stop and ask. Do not choose silently.
 
 ## Non-negotiable constraints
@@ -59,13 +61,14 @@ If a relevant contradiction remains, stop and ask. Do not choose silently.
 
 ## Engineering style
 
+- Follow existing project patterns before introducing new ones.
+- Prefer immutable domain values where practical.
+- Prefer `dataclass` with `slots` when a data-focused class is appropriate.
+- Use simple typed representations for small closed domains.
+- Do not put mutable collections inside values declared as immutable.
 - Prefer explicit code over metaprogramming.
 - Prefer composition over inheritance.
 - Use pure functions for conversions and isolated algorithms.
-- Use `@dataclass(frozen=True, slots=True)` for immutable DTOs.
-- Use `@dataclass(slots=True)` for mutable internal state.
-- Do not put mutable collections inside frozen DTOs.
-- Prefer `Literal` or type aliases for small closed domains.
 - Avoid `Any`, `cast()`, `# type: ignore`, and lint suppressions.
 - Do not create `utils.py`, `helpers.py`, factories, registries, ABCs, or protocols without a concrete consumer.
 - Keep CLI, domain, adapters, parsing, and rendering separate.
