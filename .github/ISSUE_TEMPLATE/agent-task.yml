@@ -28,7 +28,7 @@ body:
 
         Use `agent:blocked` when the task cannot continue. Only a human may apply `agent:ready`.
 
-        Applying `agent:ready` starts one Cursor Cloud Agent through a dedicated GitHub Actions dispatch workflow. That workflow does not change lifecycle labels. After `agent:ready`, GitHub Actions updates labels when a pull request uses the template `Closes #<issue>` form: opening the PR moves the Issue to `agent:working` and copies that Issue's `risk:*` label to the PR; marking that PR ready for review moves the Issue to `needs:human-review`. Merge still closes the Issue through GitHub's normal `Closes #N` behavior.
+        Applying `agent:ready` starts one Cursor Cloud Agent through a dedicated GitHub Actions dispatch workflow. That workflow does not change lifecycle labels. After `agent:ready`, GitHub Actions updates labels when a pull request uses the template `Closes #<issue>` form: opening the PR moves the Issue to `agent:working` and copies that Issue's `risk:*` label to the PR; marking that PR ready for review moves the Issue to `needs:human-review`. If Codex later leaves a structured P0 or P1 review badge on that Agent Task PR, a dedicated rework workflow may dispatch at most two Cursor agents onto the existing PR branch. That rework workflow does not change lifecycle or risk labels and never merges. Merge still closes the Issue through GitHub's normal `Closes #N` behavior.
   - type: textarea
     id: context
     attributes:
