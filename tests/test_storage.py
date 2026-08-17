@@ -224,6 +224,18 @@ def test_latest_capture_tie_breaks_by_filename(tmp_path: Path) -> None:
     assert latest_capture(tmp_path) == winner
 
 
+def test_latest_capture_does_not_materialize_all_captures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _touch_capture(tmp_path, "older.jsonl", 1_000)
+    newer = _touch_capture(tmp_path, "newer.jsonl", 2_000)
+
+    def boom(_directory: Path) -> list[object]:
+        raise AssertionError("latest_capture must not sort the full capture list")
+
+    monkeypatch.setattr("coding_agent_performance.trace.storage._scan_eligible_captures", boom)
+
+    assert latest_capture(tmp_path) == newer
+
+
 def test_latest_capture_missing_directory(tmp_path: Path) -> None:
     missing = tmp_path / "captures"
     with pytest.raises(LatestCaptureError, match="does not exist") as exc_info:

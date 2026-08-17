@@ -3,6 +3,7 @@
 import os
 import secrets
 import threading
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -83,28 +84,36 @@ def list_captures(directory: Path) -> tuple[CaptureListing, ...]:
 
 
 def _select_latest_capture(directory: Path) -> Path | None:
-    candidates = _scan_eligible_captures(directory)
-    if not candidates:
+    selected: _CaptureCandidate | None = None
+    for candidate in _iter_eligible_captures(directory):
+        if selected is None or _capture_order_key(candidate) > _capture_order_key(selected):
+            selected = candidate
+    if selected is None:
         return None
-    return directory / candidates[0].name
+    return directory / selected.name
 
 
 def _scan_eligible_captures(directory: Path) -> list[_CaptureCandidate]:
-    candidates: list[_CaptureCandidate] = []
+    candidates = list(_iter_eligible_captures(directory))
+    candidates.sort(key=_capture_order_key, reverse=True)
+    return candidates
+
+
+def _iter_eligible_captures(directory: Path) -> Iterator[_CaptureCandidate]:
     with os.scandir(directory) as entries:
         for entry in entries:
             if not _is_eligible_capture(entry):
                 continue
             stat_result = entry.stat(follow_symlinks=False)
-            candidates.append(
-                _CaptureCandidate(
-                    name=entry.name,
-                    size_bytes=stat_result.st_size,
-                    mtime_ns=stat_result.st_mtime_ns,
-                )
+            yield _CaptureCandidate(
+                name=entry.name,
+                size_bytes=stat_result.st_size,
+                mtime_ns=stat_result.st_mtime_ns,
             )
-    candidates.sort(key=lambda candidate: (candidate.mtime_ns, candidate.name), reverse=True)
-    return candidates
+
+
+def _capture_order_key(candidate: _CaptureCandidate) -> tuple[int, str]:
+    return (candidate.mtime_ns, candidate.name)
 
 
 def _is_eligible_capture(entry: os.DirEntry[str]) -> bool:
