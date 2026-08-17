@@ -102,7 +102,7 @@ Unexpected lifecycle states, including a missing lifecycle label, produce a diag
 
 `agent:ready` is never applied automatically. Risk classification is never inferred. Merged PRs close Issues through GitHub's normal `Closes #N` behavior.
 
-Parsing and transition rules live in `.github/scripts/agent_lifecycle.py` and are tested locally. Applying labels, GitHub event delivery, and token permissions require the real `pull_request` workflow environment and are not reproduced by the local test suite.
+Parsing, REST Issue label reads, retry decisions, and transition rules live in `.github/scripts/agent_lifecycle.py` and are tested locally with synthetic GitHub responses. Issue label reads use GitHub REST via `gh api repos/{owner}/{repo}/issues/{n}` rather than GraphQL. HTTP 500, 502, 503, and 504 are retried a small bounded number of times; other failures fail immediately and perform no label mutation. Live `gh api` HTTP, label mutation, event delivery, and token permissions require the real `pull_request` workflow environment and are not reproduced by the local test suite.
 
 ## Issue and task contract
 

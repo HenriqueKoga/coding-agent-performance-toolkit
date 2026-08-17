@@ -7,9 +7,12 @@ label mutations. It never applies `agent:ready`.
 
 import argparse
 import json
+import os
 import re
+import subprocess
 import sys
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TextIO
@@ -37,7 +40,12 @@ LIFECYCLE_LABELS: tuple[LifecycleLabel, ...] = (
     "agent:blocked",
 )
 
+GITHUB_REST_READ_MAX_ATTEMPTS = 3
+GITHUB_REST_READ_RETRY_DELAY_SECONDS = 2.0
+RETRYABLE_GITHUB_HTTP_STATUSES = frozenset({500, 502, 503, 504})
+
 _CLOSES_LINE = re.compile(r"^[ \t]*Closes #(\d+)[ \t]*$", re.MULTILINE)
+_GITHUB_HTTP_STATUS = re.compile(r"\bHTTP (\d{3})\b")
 
 
 class LifecycleError(Exception):
@@ -73,6 +81,13 @@ class LifecyclePlan:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class GitHubApiResponse:
+    returncode: int
+    stdout: str
+    stderr: str
+
+
 def parse_linked_issue_number(body: str) -> int:
     """Return the single `Closes #<issue>` target from a pull-request body."""
     matches = _CLOSES_LINE.findall(body.replace("\r\n", "\n").replace("\r", "\n"))
@@ -105,6 +120,51 @@ def load_pull_request_event(path: Path) -> PullRequestEvent:
             return PullRequestEvent(action="ready_for_review", body=body)
         case _:
             raise LifecycleError("GitHub event action is not a supported pull_request lifecycle event")
+
+
+def is_retryable_github_http_status(status_code: int | None) -> bool:
+    """Return True only for transient GitHub HTTP 5xx statuses that may be retried."""
+    return status_code in RETRYABLE_GITHUB_HTTP_STATUSES
+
+
+def github_http_status_from_stderr(stderr: str) -> int | None:
+    """Parse a `gh api` HTTP status from stderr without returning the payload."""
+    match = _GITHUB_HTTP_STATUS.search(stderr)
+    if match is None:
+        return None
+    return int(match.group(1))
+
+
+def read_issue_label_names(
+    repository: str,
+    issue_number: int,
+    *,
+    run_api: Callable[[str], GitHubApiResponse] | None = None,
+    sleep: Callable[[float], None] | None = None,
+    notify: Callable[[str], None] | None = None,
+) -> tuple[str, ...]:
+    """Read Issue labels from GitHub REST, retrying only bounded transient 5xx failures."""
+    _require_positive_issue_number(issue_number)
+    owner_repo = _require_owner_repo(repository)
+    runner = _run_gh_api if run_api is None else run_api
+    sleeper = time.sleep if sleep is None else sleep
+    log = _print_stderr if notify is None else notify
+    path = f"repos/{owner_repo}/issues/{issue_number}"
+    last_status: int | None = None
+    attempt = 0
+    for attempt in range(1, GITHUB_REST_READ_MAX_ATTEMPTS + 1):
+        response = runner(path)
+        if response.returncode == 0:
+            return _label_names_from_issue_payload(response.stdout)
+        last_status = github_http_status_from_stderr(response.stderr)
+        if not is_retryable_github_http_status(last_status) or attempt == GITHUB_REST_READ_MAX_ATTEMPTS:
+            break
+        log(
+            f"GitHub REST issue #{issue_number} read returned HTTP {last_status} "
+            f"(attempt {attempt}/{GITHUB_REST_READ_MAX_ATTEMPTS}); retrying"
+        )
+        sleeper(GITHUB_REST_READ_RETRY_DELAY_SECONDS)
+    raise LifecycleError(_rest_read_failure_message(issue_number, last_status, attempt))
 
 
 def plan_lifecycle(
@@ -254,12 +314,85 @@ def _load_label_list(text: str, what: str) -> tuple[str, ...]:
     return tuple(parsed)
 
 
+def _require_positive_issue_number(issue_number: int) -> None:
+    if issue_number <= 0:
+        raise LifecycleError("issue number must be positive")
+
+
+def _require_owner_repo(repository: str) -> str:
+    owner, separator, name = repository.partition("/")
+    if not separator or not owner or not name or "/" in name:
+        raise LifecycleError("GitHub repository must be owner/repo")
+    return repository
+
+
+def _repository_from_cli(repo_arg: str | None) -> str:
+    if repo_arg:
+        return repo_arg
+    value = os.environ.get("GH_REPO", "")
+    if not value:
+        raise LifecycleError("GH_REPO is not set")
+    return value
+
+
+def _print_stderr(message: str) -> None:
+    print(message, file=sys.stderr)
+
+
+def _run_gh_api(path: str) -> GitHubApiResponse:
+    try:
+        completed = subprocess.run(
+            ["gh", "api", path],
+            capture_output=True,
+            check=False,
+            text=True,
+            encoding="utf-8",
+        )
+    except OSError:
+        raise LifecycleError("GitHub CLI is not available for REST issue read") from None
+    return GitHubApiResponse(returncode=completed.returncode, stdout=completed.stdout, stderr=completed.stderr)
+
+
+def _label_names_from_issue_payload(text: str) -> tuple[str, ...]:
+    try:
+        parsed: object = json.loads(text)
+    except RecursionError, json.JSONDecodeError, ValueError:
+        raise LifecycleError("GitHub REST issue response is not valid JSON") from None
+    if not isinstance(parsed, dict):
+        raise LifecycleError("GitHub REST issue response must be a JSON object")
+    labels = parsed.get("labels")
+    if not isinstance(labels, list):
+        raise LifecycleError("GitHub REST issue response is missing labels")
+    names: list[str] = []
+    for item in labels:
+        if not isinstance(item, dict):
+            raise LifecycleError("GitHub REST issue labels are invalid")
+        name = item.get("name")
+        if not isinstance(name, str):
+            raise LifecycleError("GitHub REST issue labels are invalid")
+        names.append(name)
+    return tuple(names)
+
+
+def _rest_read_failure_message(issue_number: int, status_code: int | None, attempts: int) -> str:
+    if status_code is None:
+        attempt_word = "attempt" if attempts == 1 else "attempts"
+        return f"GitHub REST issue #{issue_number} read failed after {attempts} {attempt_word}"
+    if is_retryable_github_http_status(status_code):
+        return f"GitHub REST issue #{issue_number} read failed with HTTP {status_code} after {attempts} attempts"
+    return f"GitHub REST issue #{issue_number} read failed with HTTP {status_code}"
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Plan Agent Task lifecycle label mutations.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     parse_link = subparsers.add_parser("parse-link", help="Print the single Closes #<issue> target.")
     parse_link.add_argument("--event-file", type=Path, required=True)
+
+    read_labels = subparsers.add_parser("read-issue-labels", help="Read Issue labels from GitHub REST.")
+    read_labels.add_argument("--issue", dest="issue_number", type=int, required=True)
+    read_labels.add_argument("--repo", default=None)
 
     plan = subparsers.add_parser("plan", help="Print a JSON lifecycle plan.")
     plan.add_argument("--event-file", type=Path, required=True)
@@ -273,6 +406,12 @@ def _run_parse_link(event_file: Path, stdout: TextIO) -> int:
     event = load_pull_request_event(event_file)
     issue_number = parse_linked_issue_number(event.body)
     print(issue_number, file=stdout)
+    return 0
+
+
+def _run_read_issue_labels(issue_number: int, repo_arg: str | None, stdout: TextIO) -> int:
+    labels = read_issue_label_names(_repository_from_cli(repo_arg), issue_number)
+    print(json.dumps(list(labels), allow_nan=False), file=stdout)
     return 0
 
 
@@ -304,6 +443,8 @@ def main(argv: Sequence[str] | None = None, stdout: TextIO | None = None) -> int
         match args.command:
             case "parse-link":
                 return _run_parse_link(args.event_file, output)
+            case "read-issue-labels":
+                return _run_read_issue_labels(args.issue_number, args.repo, output)
             case "plan":
                 return _run_plan(
                     args.event_file,

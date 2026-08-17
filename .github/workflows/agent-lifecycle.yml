@@ -43,7 +43,7 @@ jobs:
           issue="$(python .github/scripts/agent_lifecycle.py parse-link --event-file "${GITHUB_EVENT_PATH}")"
 
           issue_labels_json="$(
-            gh issue view "${issue}" --json labels --jq '[.labels[].name]'
+            python .github/scripts/agent_lifecycle.py read-issue-labels --issue "${issue}"
           )"
           pr_labels_json="$(
             jq -c '[.pull_request.labels[].name]' "${GITHUB_EVENT_PATH}"
