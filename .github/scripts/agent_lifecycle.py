@@ -99,8 +99,10 @@ def load_pull_request_event(path: Path) -> PullRequestEvent:
     else:
         raise LifecycleError("pull request body is not a string")
     match payload.get("action"):
-        case "opened" | "ready_for_review" as action:
-            return PullRequestEvent(action=action, body=body)
+        case "opened":
+            return PullRequestEvent(action="opened", body=body)
+        case "ready_for_review":
+            return PullRequestEvent(action="ready_for_review", body=body)
         case _:
             raise LifecycleError("GitHub event action is not a supported pull_request lifecycle event")
 
