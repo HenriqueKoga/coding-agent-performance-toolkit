@@ -277,7 +277,7 @@ def interpret_cursor_create_response(issue_number: int, agent_id: str, response:
         return _created_result(issue_number, agent_id, response.body)
     if response.status_code == 409:
         code = _cursor_error_code(response.body)
-        if code is None or code == AGENT_ID_CONFLICT:
+        if code == AGENT_ID_CONFLICT:
             return DispatchResult(
                 outcome="already_dispatched",
                 issue_number=issue_number,
@@ -288,6 +288,8 @@ def interpret_cursor_create_response(issue_number: int, agent_id: str, response:
                     f"Issue #{issue_number} already dispatched to Cursor agent {agent_id}; not creating another agent"
                 ),
             )
+        if code is None:
+            raise DispatchError("Cursor API returned HTTP 409")
         raise DispatchError(f"Cursor API returned HTTP 409 ({code})")
     raise DispatchError(f"Cursor API returned HTTP {response.status_code}")
 

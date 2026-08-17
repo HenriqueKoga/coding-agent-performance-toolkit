@@ -265,11 +265,22 @@ def test_duplicate_cursor_conflict_is_already_dispatched() -> None:
     assert SECRET not in result.message
 
 
-def test_unparseable_conflict_is_already_dispatched_without_payload() -> None:
-    agent_id = build_agent_id(18)
-    result = interpret_cursor_create_response(18, agent_id, HttpResponse(409, f"conflict {SECRET}"))
-    assert result.outcome == "already_dispatched"
-    assert SECRET not in result.message
+def test_unparseable_conflict_fails_closed_without_payload() -> None:
+    with pytest.raises(DispatchError, match=r"Cursor API returned HTTP 409$") as exc_info:
+        interpret_cursor_create_response(18, build_agent_id(18), HttpResponse(409, f"conflict {SECRET}"))
+    assert SECRET not in str(exc_info.value)
+    assert "already dispatched" not in str(exc_info.value)
+
+
+def test_conflict_without_error_code_fails_closed_without_payload() -> None:
+    with pytest.raises(DispatchError, match=r"Cursor API returned HTTP 409$") as exc_info:
+        interpret_cursor_create_response(
+            18,
+            build_agent_id(18),
+            HttpResponse(409, json.dumps({"error": {"message": SECRET}})),
+        )
+    assert SECRET not in str(exc_info.value)
+    assert "already dispatched" not in str(exc_info.value)
 
 
 def test_unexpected_conflict_code_fails_without_payload() -> None:
