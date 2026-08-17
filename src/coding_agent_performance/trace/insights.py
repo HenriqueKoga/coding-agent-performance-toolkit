@@ -3,6 +3,7 @@
 from math import gcd
 
 from coding_agent_performance.trace.report import (
+    DominantTool,
     FailureRate,
     HighToolFailureRate,
     HighToolResultVolume,
@@ -18,6 +19,8 @@ HIGH_TOOL_RESULT_VOLUME_THRESHOLD = 128 * 1024
 HIGH_TOOL_FAILURE_RATE_MIN_CALLS = 3
 HIGH_TOOL_FAILURE_RATE_THRESHOLD_NUMERATOR = 1
 HIGH_TOOL_FAILURE_RATE_THRESHOLD_DENOMINATOR = 2
+DOMINANT_TOOL_MIN_TOTAL_CALLS = 10
+DOMINANT_TOOL_SHARE_THRESHOLD_PERCENT = 60
 
 
 def detect_repeated_tool_calls(tools: ToolStats) -> tuple[RepeatedToolCall, ...]:
@@ -85,6 +88,32 @@ def detect_high_tool_failure_rate(tools: ToolStats) -> tuple[HighToolFailureRate
     return tuple(findings)
 
 
+def detect_dominant_tool(tools: ToolStats) -> DominantTool | None:
+    """Identify a tool that accounts for a large share of capture tool calls.
+
+    Requires at least `DOMINANT_TOOL_MIN_TOTAL_CALLS` total calls and a single
+    tool whose share meets `DOMINANT_TOOL_SHARE_THRESHOLD_PERCENT`. Share
+    comparisons use integer arithmetic. When multiple tools share the
+    qualifying maximum call count, the lexicographically first tool name wins.
+    """
+    total_calls = tools.calls
+    if total_calls < DOMINANT_TOOL_MIN_TOTAL_CALLS or not tools.by_name:
+        return None
+    max_calls = max(breakdown.calls for breakdown in tools.by_name)
+    if max_calls * 100 < total_calls * DOMINANT_TOOL_SHARE_THRESHOLD_PERCENT:
+        return None
+    winner = min(
+        (breakdown for breakdown in tools.by_name if breakdown.calls == max_calls),
+        key=lambda breakdown: breakdown.name,
+    )
+    return DominantTool(
+        tool_name=winner.name,
+        call_count=winner.calls,
+        total_calls=total_calls,
+        share_percent=(winner.calls * 100) // total_calls,
+    )
+
+
 def compute_insights(tools: ToolStats) -> Insights:
     """Compute all deterministic insights for a trace summary."""
     return Insights(
@@ -92,6 +121,7 @@ def compute_insights(tools: ToolStats) -> Insights:
         repeated_failed_tool_calls=detect_repeated_failed_tool_calls(tools),
         high_tool_result_volume=detect_high_tool_result_volume(tools),
         high_tool_failure_rate=detect_high_tool_failure_rate(tools),
+        dominant_tool=detect_dominant_tool(tools),
     )
 
 

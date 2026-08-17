@@ -136,10 +136,12 @@ def test_json_allowlist_keeps_insight_keys() -> None:
         "repeated_failed_tool_calls",
         "high_tool_result_volume",
         "high_tool_failure_rate",
+        "dominant_tool",
     }
     assert insights["repeated_failed_tool_calls"] == []
     assert insights["high_tool_result_volume"] == []
     assert insights["high_tool_failure_rate"] == []
+    assert insights["dominant_tool"] is None
 
 
 def test_text_usage_source_labels() -> None:
@@ -778,6 +780,7 @@ def test_zero_tool_calls_render_explicit_safe_rate() -> None:
         "repeated_failed_tool_calls": [],
         "high_tool_result_volume": [],
         "high_tool_failure_rate": [],
+        "dominant_tool": None,
     }
 
 
@@ -844,6 +847,7 @@ def test_mixed_calls_render_exact_counts_and_stable_rate() -> None:
         "repeated_failed_tool_calls": [],
         "high_tool_result_volume": [],
         "high_tool_failure_rate": [],
+        "dominant_tool": None,
     }
 
 
@@ -1051,3 +1055,182 @@ def test_high_tool_failure_rate_contains_only_safe_evidence() -> None:
         assert isinstance(finding["total_calls"], int)
         assert isinstance(finding["failure_rate"]["numerator"], int)
         assert isinstance(finding["failure_rate"]["denominator"], int)
+
+
+def test_dominant_tool_appears_in_text() -> None:
+    summarizer = IncrementalSummarizer(filename="dominant-insights.jsonl")
+    _add_tools(
+        summarizer,
+        *(_tool_execution("Read", success=True, event_sequence=i) for i in range(8)),
+        *(_tool_execution("Grep", success=True, event_sequence=i + 8) for i in range(2)),
+    )
+    text = render_text(summarizer.finish(Path("dominant-insights.jsonl")))
+    assert "Insights" in text
+    assert "Dominant tool" in text
+    assert "- Read: 8/10 calls (80%)" in text
+
+
+def test_dominant_tool_not_present_below_minimum_sample() -> None:
+    summarizer = IncrementalSummarizer(filename="dominant-below-sample.jsonl")
+    _add_tools(summarizer, *(_tool_execution("Read", success=True, event_sequence=i) for i in range(9)))
+    summary = summarizer.finish(Path("dominant-below-sample.jsonl"))
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert "Dominant tool" not in text
+    assert parsed["insights"]["dominant_tool"] is None
+
+
+def test_dominant_tool_not_present_below_share_threshold() -> None:
+    summarizer = IncrementalSummarizer(filename="dominant-below-share.jsonl")
+    _add_tools(
+        summarizer,
+        *(_tool_execution("Read", success=True, event_sequence=i) for i in range(5)),
+        *(_tool_execution("Grep", success=True, event_sequence=i + 5) for i in range(5)),
+    )
+    summary = summarizer.finish(Path("dominant-below-share.jsonl"))
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert "Dominant tool" not in text
+    assert parsed["insights"]["dominant_tool"] is None
+
+
+def test_dominant_tool_at_threshold_in_json_output() -> None:
+    summarizer = IncrementalSummarizer(filename="dominant-at-threshold.jsonl")
+    _add_tools(
+        summarizer,
+        *(_tool_execution("Read", success=True, event_sequence=i) for i in range(6)),
+        *(_tool_execution("Grep", success=True, event_sequence=i + 6) for i in range(4)),
+    )
+    parsed = json.loads(render_json(summarizer.finish(Path("dominant-at-threshold.jsonl"))))
+    assert parsed["insights"]["dominant_tool"] == {
+        "tool_name": "Read",
+        "call_count": 6,
+        "total_calls": 10,
+        "share_percent": 60,
+    }
+
+
+def test_dominant_tool_in_json_output() -> None:
+    summarizer = IncrementalSummarizer(filename="dominant-insights.jsonl")
+    _add_tools(
+        summarizer,
+        *(_tool_execution("Read", success=True, event_sequence=i) for i in range(8)),
+        *(_tool_execution("Grep", success=True, event_sequence=i + 8) for i in range(2)),
+    )
+    parsed = json.loads(render_json(summarizer.finish(Path("dominant-insights.jsonl"))))
+    assert parsed["insights"]["dominant_tool"] == {
+        "tool_name": "Read",
+        "call_count": 8,
+        "total_calls": 10,
+        "share_percent": 80,
+    }
+
+
+def test_dominant_tool_text_and_json_are_deterministic() -> None:
+    summarizer = IncrementalSummarizer(filename="dominant-deterministic.jsonl")
+    _add_tools(
+        summarizer,
+        *(_tool_execution("Read", success=True, event_sequence=i) for i in range(8)),
+        *(_tool_execution("Grep", success=True, event_sequence=i + 8) for i in range(2)),
+    )
+    summary = summarizer.finish(Path("dominant-deterministic.jsonl"))
+    text = render_text(summary)
+    payload = render_json(summary)
+    assert render_text(summary) == text
+    assert render_json(summary) == payload
+    parsed = json.loads(payload)
+    assert "- Read: 8/10 calls (80%)" in text
+    assert parsed["insights"]["dominant_tool"] == {
+        "tool_name": "Read",
+        "call_count": 8,
+        "total_calls": 10,
+        "share_percent": 80,
+    }
+
+
+def test_dominant_tool_coexists_with_existing_insights() -> None:
+    summarizer = IncrementalSummarizer(filename="dominant-coexist.jsonl")
+    records = [
+        *(_tool_execution("Read", success=True, event_sequence=i, result_size_bytes=24576) for i in range(8)),
+        *(
+            _tool_execution(
+                "Bash",
+                success=False,
+                event_sequence=i + 8,
+                error_type="ShellError",
+                result_size_bytes=0,
+            )
+            for i in range(3)
+        ),
+    ]
+    _add_tools(summarizer, *records)
+    summary = summarizer.finish(Path("dominant-coexist.jsonl"))
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert "- Read: 8 calls" in text
+    assert "- Bash: 3 calls" in text
+    assert "- Bash: 3 failures" in text
+    assert "- Read: 196608 result bytes" in text
+    assert "- Bash: 3 failed of 3 calls (1/1)" in text
+    assert "- Read: 8/11 calls (72%)" in text
+    assert parsed["insights"]["repeated_tool_calls"] == [
+        {"tool_name": "Bash", "call_count": 3},
+        {"tool_name": "Read", "call_count": 8},
+    ]
+    assert parsed["insights"]["repeated_failed_tool_calls"] == [{"tool_name": "Bash", "failure_count": 3}]
+    assert parsed["insights"]["high_tool_result_volume"] == [{"tool_name": "Read", "result_bytes": 196608}]
+    assert parsed["insights"]["high_tool_failure_rate"] == [
+        {
+            "tool_name": "Bash",
+            "failed_calls": 3,
+            "total_calls": 3,
+            "failure_rate": {"numerator": 1, "denominator": 1},
+        }
+    ]
+    assert parsed["insights"]["dominant_tool"] == {
+        "tool_name": "Read",
+        "call_count": 8,
+        "total_calls": 11,
+        "share_percent": 72,
+    }
+
+
+def test_dominant_tool_contains_only_safe_evidence() -> None:
+    summarizer = IncrementalSummarizer(filename="dominant-privacy.jsonl")
+    _add_tools(
+        summarizer,
+        *(
+            _tool_execution(
+                "Read",
+                success=True,
+                event_sequence=i,
+                session_id="secret-session-id",
+                prompt_id="secret-prompt-id",
+                tool_use_id="secret-tool-id",
+            )
+            for i in range(8)
+        ),
+        *(_tool_execution("Grep", success=True, event_sequence=i + 8) for i in range(2)),
+    )
+    summary = summarizer.finish(Path("dominant-privacy.jsonl"))
+    text = render_text(summary)
+    payload = render_json(summary)
+    for marker in (
+        "secret-session-id",
+        "secret-prompt-id",
+        "secret-tool-id",
+        "file contents",
+        "/tmp/",
+        "arguments",
+        "should use Grep",
+        "inefficient",
+    ):
+        assert marker not in text
+        assert marker not in payload
+    parsed = json.loads(payload)
+    finding = parsed["insights"]["dominant_tool"]
+    assert finding is not None
+    assert set(finding.keys()) == {"tool_name", "call_count", "total_calls", "share_percent"}
+    assert isinstance(finding["call_count"], int)
+    assert isinstance(finding["total_calls"], int)
+    assert isinstance(finding["share_percent"], int)

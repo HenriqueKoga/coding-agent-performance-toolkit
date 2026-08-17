@@ -186,11 +186,20 @@ class HighToolFailureRate:
 
 
 @dataclass(frozen=True, slots=True)
+class DominantTool:
+    tool_name: str
+    call_count: int
+    total_calls: int
+    share_percent: int
+
+
+@dataclass(frozen=True, slots=True)
 class Insights:
     repeated_tool_calls: tuple[RepeatedToolCall, ...]
     repeated_failed_tool_calls: tuple[RepeatedFailedToolCall, ...]
     high_tool_result_volume: tuple[HighToolResultVolume, ...]
     high_tool_failure_rate: tuple[HighToolFailureRate, ...]
+    dominant_tool: DominantTool | None
 
 
 @dataclass(frozen=True, slots=True)
