@@ -25,9 +25,9 @@ from agent_lifecycle import (
     AGENT_READY,
     GITHUB_REST_READ_MAX_ATTEMPTS,
     GITHUB_REST_READ_RETRY_DELAY_SECONDS,
-    GitHubApiResponse,
     LIFECYCLE_LABELS,
     RISK_LABELS,
+    GitHubApiResponse,
     github_http_status_from_stderr,
     is_retryable_github_http_status,
 )
@@ -285,8 +285,7 @@ def interpret_cursor_create_response(issue_number: int, agent_id: str, response:
                 agent_url=_agent_url(agent_id),
                 run_id=None,
                 message=(
-                    f"Issue #{issue_number} already dispatched to Cursor agent {agent_id}; "
-                    "not creating another agent"
+                    f"Issue #{issue_number} already dispatched to Cursor agent {agent_id}; not creating another agent"
                 ),
             )
         raise DispatchError(f"Cursor API returned HTTP 409 ({code})")
@@ -335,7 +334,7 @@ def _cursor_error_code(body: str) -> str | None:
 
 
 def _authorization_header(api_key: str) -> str:
-    token = base64.b64encode(f"{api_key}:".encode("utf-8")).decode("ascii")
+    token = base64.b64encode(f"{api_key}:".encode()).decode("ascii")
     return f"Basic {token}"
 
 

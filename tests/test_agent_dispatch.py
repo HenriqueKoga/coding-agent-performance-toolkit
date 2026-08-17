@@ -447,9 +447,7 @@ def test_cli_submit_missing_key_prints_no_secret(
     assert SECRET not in captured.err
 
 
-def test_cli_dispatch_uses_rest_issue_and_posts_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cli_dispatch_uses_rest_issue_and_posts_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     event = _event_file(tmp_path)
     request = build_create_agent_request(18)
     api = _ScriptedGitHubApi([_ok_issue()])
@@ -552,9 +550,7 @@ def test_lifecycle_semantics_file_still_plans_ready_to_working() -> None:
     assert "agent:ready" not in plan.issue_add
 
 
-def test_cli_rejects_invalid_event_json_without_contents(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_cli_rejects_invalid_event_json_without_contents(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     path = tmp_path / "event.json"
     path.write_text(f'{{"prompt": "{SECRET}"', encoding="utf-8")
     stdout = StringIO()
