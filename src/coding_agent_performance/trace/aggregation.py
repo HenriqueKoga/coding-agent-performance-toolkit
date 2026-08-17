@@ -91,9 +91,8 @@ class IncrementalSummarizer:
             self._coverage.record_unknown_metric(record.name)
             return
         identity = _log_identity(record)
-        if identity is not None:
-            if not self._coverage.observe_log(identity):
-                return
+        if identity is not None and not self._coverage.observe_log(identity):
+            return
         session_id = getattr(record, "session_id", None)
         if isinstance(session_id, str) and session_id:
             self._sessions.add_id(session_id)
