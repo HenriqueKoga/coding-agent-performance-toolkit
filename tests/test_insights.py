@@ -2,6 +2,7 @@
 
 from coding_agent_performance.trace.insights import (
     HIGH_TOOL_RESULT_VOLUME_THRESHOLD,
+    InsightAnalyzer,
     compute_insights,
     detect_high_tool_result_volume,
     detect_repeated_failed_tool_calls,
@@ -236,7 +237,9 @@ def test_compute_insights() -> None:
         ),
     )
     insights = compute_insights(tools)
+    analyzed = InsightAnalyzer(tools=tools).analyze()
     assert isinstance(insights, Insights)
+    assert insights == analyzed
     assert insights.repeated_tool_calls == (RepeatedToolCall(tool_name="Read", call_count=8),)
     assert insights.repeated_failed_tool_calls == ()
     assert insights.high_tool_result_volume == ()
