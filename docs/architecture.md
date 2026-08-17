@@ -60,7 +60,9 @@ Claude Code
     -> OTLP decoder
     -> Claude Code normalizer
     -> incremental summarizer
-    -> insight computation
+          -> capture/session/usage/tool/metric/coverage accumulators
+          -> immutable TraceSummary
+          -> InsightAnalyzer
     -> text or JSON renderer
 ```
 
@@ -81,8 +83,9 @@ src/coding_agent_performance/
     trace/records.py                    Provider-neutral normalized records
     trace/report.py                     Immutable summary DTOs
     trace/cost.py                       Safe USD to microdollar conversion
-    trace/aggregation.py                Incremental summarizer and statistics
-    trace/insights.py                   Deterministic insight rules
+    trace/accumulators.py               Mutable aggregation state and snapshots
+    trace/aggregation.py                Incremental summarizer orchestration
+    trace/insights.py                   InsightAnalyzer and deterministic rules
     trace/summary.py                    Capture-to-summary use case
     trace/rendering.py                  Allowlist JSON dict plus text/JSON summary and capture-list output
 ```
@@ -97,7 +100,7 @@ The OTLP decoder understands `AnyValue`, `resourceLogs`, and `resourceMetrics` o
 
 Normalization is allowlist-based. Session and prompt identifiers may exist in memory for counting and deduplication. They never appear in the summary DTO, text output, or JSON output.
 
-The summarizer is incremental. It keeps small duration lists for percentiles and metric series state for cumulative versus delta resolution. It does not materialize every envelope or raw attribute map.
+Aggregation is incremental. Accumulators keep small duration lists for percentiles and metric series state for cumulative versus delta resolution. They do not materialize every envelope or raw attribute map.
 
 Text and JSON renderers consume the finished DTO only. JSON is written with `allow_nan=False`.
 
@@ -138,6 +141,8 @@ Domain records live in `trace/records.py`. They carry only the fields required f
 
 ## Incremental summarizer
 
+`IncrementalSummarizer` orchestrates capture ingestion and finalization. Mutable aggregation state lives in cohesive accumulators for capture, session, usage, tool, metric, and coverage concerns. Each accumulator owns the operations that maintain its invariants and emits an immutable report DTO. `InsightAnalyzer` then consumes provider-neutral summary evidence, currently `ToolStats`, and produces deterministic `Insights`. Rendering reads the finished `TraceSummary` only.
+
 `api_request` events are the preferred source for tokens, cost, duration, model, and query source. If any remain after deduplication, token and cost metrics are ignored for those totals. Otherwise the summarizer falls back to `claude_code.token.usage` and `claude_code.cost.usage`.
 
 Log records are deduplicated when `session.id`, `event.sequence`, and the event name are all present. Metric points are deduplicated by series identity and timestamp.
@@ -165,7 +170,7 @@ Likely shape, kept high-level on purpose:
 
 1. **Ingestion.** Isolated adapters configure or read vendor-specific sources and emit raw captures. The Claude Code path is OTLP HTTP/JSON; other agents may differ.
 2. **Normalization.** A provider-independent layer turns raw envelopes into shared records. That layer does not live inside the HTTP receiver.
-3. **Domain.** Deterministic insight rules operate on summaries and normalized records. Repeated tool calls, repeated failed tool calls, and high cumulative tool result volume are implemented. Future rules may detect loops, redundant calls, oversized individual outputs, and later support a Context Ledger.
+3. **Domain.** Deterministic insight rules operate on immutable summary evidence through `InsightAnalyzer`. Repeated tool calls, repeated failed tool calls, and high cumulative tool result volume are implemented. Future rules may detect loops, redundant calls, oversized individual outputs, and later support a Context Ledger. New insight rules should extend the analyzer or remain small stateless functions; they should not add mutable state to report DTOs.
 4. **Search.** Code search optimized for LLM consumption, still local.
 5. **Output.** Concise structured reports for humans and agents.
 
