@@ -99,7 +99,7 @@ In Cursor Agent, the skills appear as `/speckit-*` (hyphen form). Spec Kit docum
 
 ## Recommended specification workflow
 
-Use this path for new roadmap work. The bundled Spec Kit workflow that ends in `/speckit.implement` is **not** the CAPT production path.
+Use this path for new roadmap work. The registered `speckit` workflow is truncated so it stops after `/speckit.tasks` and never calls `/speckit.implement`.
 
 ```text
 /speckit.constitution   # once, or when principles change
@@ -176,13 +176,14 @@ Because those gaps cannot be closed without changing the lifecycle, **do not run
 
 ## Project-local customizations
 
-CAPT uses only project-local template overrides:
+CAPT uses only project-local template overrides and one bundled-workflow truncation:
 
 - `.specify/templates/overrides/spec-template.md`
 - `.specify/templates/overrides/plan-template.md`
 - `.specify/templates/overrides/tasks-template.md`
+- `.specify/workflows/speckit/workflow.yml` stops after `/speckit.tasks` and a manual Agent Task handoff gate; it does not call `/speckit.implement`
 
-These exist to surface CAPT constraints in generated artifacts. This pilot does not add a custom extension, bundle, catalog, or organization-wide preset.
+These exist to surface CAPT constraints in generated artifacts. This pilot does not add a custom extension, bundle, catalog, or organization-wide preset. On Spec Kit upgrade, keep the workflow truncated; do not restore the bundled implement step.
 
 ## What to commit
 
@@ -192,7 +193,7 @@ Commit:
 - `.specify/templates/` and `.specify/templates/overrides/`
 - `.specify/scripts/bash/`
 - `.specify/init-options.json`, `.specify/integration.json`, `.specify/integrations/`
-- `.specify/workflows/` (bundled; unused as the production path)
+- `.specify/workflows/` (bundled workflow truncated to stop before `/speckit.implement`)
 - `.cursor/skills/speckit-*/`
 - `specs/` feature artifacts that are synthetic and reviewable
 - This document and the related `AGENTS.md` / `docs/development.md` pointers
