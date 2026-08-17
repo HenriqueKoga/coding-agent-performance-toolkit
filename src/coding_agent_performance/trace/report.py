@@ -139,6 +139,17 @@ class CoverageStats:
 
 
 @dataclass(frozen=True, slots=True)
+class RepeatedToolCall:
+    tool_name: str
+    call_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class Insights:
+    repeated_tool_calls: tuple[RepeatedToolCall, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class TraceSummary:
     schema_version: int
     capture: CaptureInfo
@@ -147,3 +158,4 @@ class TraceSummary:
     tools: ToolStats
     activity: ActivityStats
     coverage: CoverageStats
+    insights: Insights

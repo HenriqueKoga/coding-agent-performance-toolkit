@@ -130,6 +130,15 @@ def summary_to_dict(summary: TraceSummary) -> dict[str, object]:
             "unknown_metrics": dict(summary.coverage.unknown_metrics),
             "warnings": list(summary.coverage.warnings),
         },
+        "insights": {
+            "repeated_tool_calls": [
+                {
+                    "tool_name": finding.tool_name,
+                    "call_count": finding.call_count,
+                }
+                for finding in summary.insights.repeated_tool_calls
+            ],
+        },
     }
 
 
@@ -142,6 +151,7 @@ def render_text(summary: TraceSummary) -> str:
     tools = summary.tools
     activity = summary.activity
     coverage = summary.coverage
+    insights = summary.insights
     unknown_event_count = sum(count for _name, count in coverage.unknown_events)
     sections = [
         "Capture",
@@ -168,6 +178,10 @@ def render_text(summary: TraceSummary) -> str:
     ]
     if tools.by_name:
         sections.extend(["", _tool_table(tools.by_name)])
+    if insights.repeated_tool_calls:
+        sections.extend(["", "Insights", "Repeated tool calls"])
+        for finding in insights.repeated_tool_calls:
+            sections.append(f"- {finding.tool_name}: {finding.call_count} calls")
     sections.extend(
         [
             "",
