@@ -1,7 +1,5 @@
 """Tests for deterministic insight rules."""
 
-from math import gcd
-
 from coding_agent_performance.trace.insights import (
     DOMINANT_TOOL_MIN_TOTAL_CALLS,
     DOMINANT_TOOL_SHARE_THRESHOLD_PERCENT,
@@ -26,241 +24,19 @@ from coding_agent_performance.trace.report import (
     ToolStats,
 )
 
-
-def test_detect_repeated_tool_calls_no_tools() -> None:
-    tools = ToolStats(
-        calls=0,
-        successes=0,
-        failures=0,
-        input_bytes=0,
-        result_bytes=0,
-        duration_ms=DurationStats(total=0, average=None, p50=None, p95=None),
-        by_name=(),
-    )
-    findings = detect_repeated_tool_calls(tools)
-    assert findings == ()
-
-
-def test_detect_repeated_tool_calls_below_threshold() -> None:
-    tools = ToolStats(
-        calls=2,
-        successes=2,
-        failures=0,
-        input_bytes=0,
-        result_bytes=0,
-        duration_ms=DurationStats(total=0, average=None, p50=None, p95=None),
-        by_name=(
-            ToolBreakdown(
-                name="Read",
-                calls=2,
-                successes=2,
-                failures=0,
-                success_rate=1.0,
-                duration_ms_total=0,
-                duration_ms_average=None,
-                input_bytes=0,
-                result_bytes=0,
-            ),
-        ),
-    )
-    findings = detect_repeated_tool_calls(tools)
-    assert findings == ()
-
-
-def test_detect_repeated_tool_calls_at_threshold() -> None:
-    tools = ToolStats(
-        calls=3,
-        successes=3,
-        failures=0,
-        input_bytes=0,
-        result_bytes=0,
-        duration_ms=DurationStats(total=0, average=None, p50=None, p95=None),
-        by_name=(
-            ToolBreakdown(
-                name="Read",
-                calls=3,
-                successes=3,
-                failures=0,
-                success_rate=1.0,
-                duration_ms_total=0,
-                duration_ms_average=None,
-                input_bytes=0,
-                result_bytes=0,
-            ),
-        ),
-    )
-    findings = detect_repeated_tool_calls(tools)
-    assert findings == (RepeatedToolCall(tool_name="Read", call_count=3),)
-
-
-def test_detect_repeated_tool_calls_above_threshold() -> None:
-    tools = ToolStats(
-        calls=8,
-        successes=8,
-        failures=0,
-        input_bytes=0,
-        result_bytes=0,
-        duration_ms=DurationStats(total=0, average=None, p50=None, p95=None),
-        by_name=(
-            ToolBreakdown(
-                name="Read",
-                calls=8,
-                successes=8,
-                failures=0,
-                success_rate=1.0,
-                duration_ms_total=0,
-                duration_ms_average=None,
-                input_bytes=0,
-                result_bytes=0,
-            ),
-        ),
-    )
-    findings = detect_repeated_tool_calls(tools)
-    assert findings == (RepeatedToolCall(tool_name="Read", call_count=8),)
-
-
-def test_detect_repeated_tool_calls_multiple_tools() -> None:
-    tools = ToolStats(
-        calls=15,
-        successes=15,
-        failures=0,
-        input_bytes=0,
-        result_bytes=0,
-        duration_ms=DurationStats(total=0, average=None, p50=None, p95=None),
-        by_name=(
-            ToolBreakdown(
-                name="Read",
-                calls=8,
-                successes=8,
-                failures=0,
-                success_rate=1.0,
-                duration_ms_total=0,
-                duration_ms_average=None,
-                input_bytes=0,
-                result_bytes=0,
-            ),
-            ToolBreakdown(
-                name="Grep",
-                calls=5,
-                successes=5,
-                failures=0,
-                success_rate=1.0,
-                duration_ms_total=0,
-                duration_ms_average=None,
-                input_bytes=0,
-                result_bytes=0,
-            ),
-            ToolBreakdown(
-                name="Write",
-                calls=2,
-                successes=2,
-                failures=0,
-                success_rate=1.0,
-                duration_ms_total=0,
-                duration_ms_average=None,
-                input_bytes=0,
-                result_bytes=0,
-            ),
-        ),
-    )
-    findings = detect_repeated_tool_calls(tools)
-    assert findings == (
-        RepeatedToolCall(tool_name="Grep", call_count=5),
-        RepeatedToolCall(tool_name="Read", call_count=8),
-    )
-
-
-def test_detect_repeated_tool_calls_deterministic_ordering() -> None:
-    tools = ToolStats(
-        calls=13,
-        successes=13,
-        failures=0,
-        input_bytes=0,
-        result_bytes=0,
-        duration_ms=DurationStats(total=0, average=None, p50=None, p95=None),
-        by_name=(
-            ToolBreakdown(
-                name="Zebra",
-                calls=5,
-                successes=5,
-                failures=0,
-                success_rate=1.0,
-                duration_ms_total=0,
-                duration_ms_average=None,
-                input_bytes=0,
-                result_bytes=0,
-            ),
-            ToolBreakdown(
-                name="Apple",
-                calls=4,
-                successes=4,
-                failures=0,
-                success_rate=1.0,
-                duration_ms_total=0,
-                duration_ms_average=None,
-                input_bytes=0,
-                result_bytes=0,
-            ),
-            ToolBreakdown(
-                name="Mango",
-                calls=4,
-                successes=4,
-                failures=0,
-                success_rate=1.0,
-                duration_ms_total=0,
-                duration_ms_average=None,
-                input_bytes=0,
-                result_bytes=0,
-            ),
-        ),
-    )
-    findings = detect_repeated_tool_calls(tools)
-    assert findings == (
-        RepeatedToolCall(tool_name="Apple", call_count=4),
-        RepeatedToolCall(tool_name="Mango", call_count=4),
-        RepeatedToolCall(tool_name="Zebra", call_count=5),
-    )
-
-
-def test_compute_insights() -> None:
-    tools = ToolStats(
-        calls=8,
-        successes=8,
-        failures=0,
-        input_bytes=0,
-        result_bytes=0,
-        duration_ms=DurationStats(total=0, average=None, p50=None, p95=None),
-        by_name=(
-            ToolBreakdown(
-                name="Read",
-                calls=8,
-                successes=8,
-                failures=0,
-                success_rate=1.0,
-                duration_ms_total=0,
-                duration_ms_average=None,
-                input_bytes=0,
-                result_bytes=0,
-            ),
-        ),
-    )
-    insights = compute_insights(tools)
-    assert isinstance(insights, Insights)
-    assert insights.repeated_tool_calls == (RepeatedToolCall(tool_name="Read", call_count=8),)
-    assert insights.repeated_failed_tool_calls == ()
-    assert insights.high_tool_result_volume == ()
-    assert insights.high_tool_failure_rate == ()
-    assert insights.dominant_tool is None
-
-
-def test_repeated_tool_call_contains_only_safe_evidence() -> None:
-    finding = RepeatedToolCall(tool_name="Read", call_count=10)
-    assert hasattr(finding, "tool_name")
-    assert hasattr(finding, "call_count")
-    assert not hasattr(finding, "arguments")
-    assert not hasattr(finding, "result")
-    assert not hasattr(finding, "input")
-    assert not hasattr(finding, "output")
+_DISALLOWED_FINDING_ATTRS = (
+    "arguments",
+    "result",
+    "input",
+    "output",
+    "error",
+    "error_type",
+    "payload",
+    "path",
+    "content",
+    "prompt",
+    "recommendation",
+)
 
 
 def _empty_duration() -> DurationStats:
@@ -299,6 +75,85 @@ def _tools(*rows: ToolBreakdown) -> ToolStats:
         duration_ms=_empty_duration(),
         by_name=rows,
     )
+
+
+def _failure_rate_finding(name: str, failed_calls: int, total_calls: int) -> HighToolFailureRate:
+    return HighToolFailureRate(
+        tool_name=name,
+        failed_calls=failed_calls,
+        total_calls=total_calls,
+        failure_rate=FailureRate.reduced(failed_calls, total_calls),
+    )
+
+
+def _assert_safe_finding(finding: object, *allowed: str) -> None:
+    for name in allowed:
+        assert hasattr(finding, name)
+    for name in _DISALLOWED_FINDING_ATTRS:
+        assert not hasattr(finding, name)
+
+
+def test_detect_repeated_tool_calls_no_tools() -> None:
+    findings = detect_repeated_tool_calls(_tools())
+    assert findings == ()
+
+
+def test_detect_repeated_tool_calls_below_threshold() -> None:
+    findings = detect_repeated_tool_calls(_tools(_tool("Read", calls=2)))
+    assert findings == ()
+
+
+def test_detect_repeated_tool_calls_at_threshold() -> None:
+    findings = detect_repeated_tool_calls(_tools(_tool("Read", calls=3)))
+    assert findings == (RepeatedToolCall(tool_name="Read", call_count=3),)
+
+
+def test_detect_repeated_tool_calls_above_threshold() -> None:
+    findings = detect_repeated_tool_calls(_tools(_tool("Read", calls=8)))
+    assert findings == (RepeatedToolCall(tool_name="Read", call_count=8),)
+
+
+def test_detect_repeated_tool_calls_multiple_tools() -> None:
+    findings = detect_repeated_tool_calls(
+        _tools(
+            _tool("Read", calls=8),
+            _tool("Grep", calls=5),
+            _tool("Write", calls=2),
+        )
+    )
+    assert findings == (
+        RepeatedToolCall(tool_name="Grep", call_count=5),
+        RepeatedToolCall(tool_name="Read", call_count=8),
+    )
+
+
+def test_detect_repeated_tool_calls_deterministic_ordering() -> None:
+    findings = detect_repeated_tool_calls(
+        _tools(
+            _tool("Zebra", calls=5),
+            _tool("Apple", calls=4),
+            _tool("Mango", calls=4),
+        )
+    )
+    assert findings == (
+        RepeatedToolCall(tool_name="Apple", call_count=4),
+        RepeatedToolCall(tool_name="Mango", call_count=4),
+        RepeatedToolCall(tool_name="Zebra", call_count=5),
+    )
+
+
+def test_compute_insights() -> None:
+    insights = compute_insights(_tools(_tool("Read", calls=8)))
+    assert isinstance(insights, Insights)
+    assert insights.repeated_tool_calls == (RepeatedToolCall(tool_name="Read", call_count=8),)
+    assert insights.repeated_failed_tool_calls == ()
+    assert insights.high_tool_result_volume == ()
+    assert insights.high_tool_failure_rate == ()
+    assert insights.dominant_tool is None
+
+
+def test_repeated_tool_call_contains_only_safe_evidence() -> None:
+    _assert_safe_finding(RepeatedToolCall(tool_name="Read", call_count=10), "tool_name", "call_count")
 
 
 def test_detect_repeated_failed_tool_calls_no_failures() -> None:
@@ -383,16 +238,7 @@ def test_compute_insights_keeps_repeated_calls_independent_of_failures() -> None
 
 
 def test_repeated_failed_tool_call_contains_only_safe_evidence() -> None:
-    finding = RepeatedFailedToolCall(tool_name="Bash", failure_count=4)
-    assert hasattr(finding, "tool_name")
-    assert hasattr(finding, "failure_count")
-    assert not hasattr(finding, "arguments")
-    assert not hasattr(finding, "result")
-    assert not hasattr(finding, "error")
-    assert not hasattr(finding, "error_type")
-    assert not hasattr(finding, "input")
-    assert not hasattr(finding, "output")
-    assert not hasattr(finding, "payload")
+    _assert_safe_finding(RepeatedFailedToolCall(tool_name="Bash", failure_count=4), "tool_name", "failure_count")
 
 
 def test_detect_high_tool_result_volume_no_tools() -> None:
@@ -475,27 +321,7 @@ def test_compute_insights_keeps_existing_rules_independent_of_result_volume() ->
 
 
 def test_high_tool_result_volume_contains_only_safe_evidence() -> None:
-    finding = HighToolResultVolume(tool_name="Read", result_bytes=196608)
-    assert hasattr(finding, "tool_name")
-    assert hasattr(finding, "result_bytes")
-    assert not hasattr(finding, "arguments")
-    assert not hasattr(finding, "result")
-    assert not hasattr(finding, "input")
-    assert not hasattr(finding, "output")
-    assert not hasattr(finding, "payload")
-    assert not hasattr(finding, "path")
-    assert not hasattr(finding, "content")
-    assert not hasattr(finding, "prompt")
-
-
-def _failure_rate_finding(name: str, failed_calls: int, total_calls: int) -> HighToolFailureRate:
-    divisor = gcd(failed_calls, total_calls)
-    return HighToolFailureRate(
-        tool_name=name,
-        failed_calls=failed_calls,
-        total_calls=total_calls,
-        failure_rate=FailureRate(numerator=failed_calls // divisor, denominator=total_calls // divisor),
-    )
+    _assert_safe_finding(HighToolResultVolume(tool_name="Read", result_bytes=196608), "tool_name", "result_bytes")
 
 
 def test_detect_high_tool_failure_rate_no_tools() -> None:
@@ -615,22 +441,9 @@ def test_compute_insights_keeps_existing_rules_independent_of_failure_rate() -> 
 
 def test_high_tool_failure_rate_contains_only_safe_evidence() -> None:
     finding = _failure_rate_finding("Bash", failed_calls=4, total_calls=6)
-    assert hasattr(finding, "tool_name")
-    assert hasattr(finding, "failed_calls")
-    assert hasattr(finding, "total_calls")
-    assert hasattr(finding, "failure_rate")
+    _assert_safe_finding(finding, "tool_name", "failed_calls", "total_calls", "failure_rate")
     assert hasattr(finding.failure_rate, "numerator")
     assert hasattr(finding.failure_rate, "denominator")
-    assert not hasattr(finding, "arguments")
-    assert not hasattr(finding, "result")
-    assert not hasattr(finding, "error")
-    assert not hasattr(finding, "error_type")
-    assert not hasattr(finding, "input")
-    assert not hasattr(finding, "output")
-    assert not hasattr(finding, "payload")
-    assert not hasattr(finding, "path")
-    assert not hasattr(finding, "content")
-    assert not hasattr(finding, "prompt")
 
 
 def test_detect_dominant_tool_no_tools() -> None:
@@ -755,17 +568,10 @@ def test_compute_insights_keeps_existing_rules_independent_of_dominant_tool() ->
 
 
 def test_dominant_tool_contains_only_safe_evidence() -> None:
-    finding = DominantTool(tool_name="Read", call_count=8, total_calls=10, share_percent=80)
-    assert hasattr(finding, "tool_name")
-    assert hasattr(finding, "call_count")
-    assert hasattr(finding, "total_calls")
-    assert hasattr(finding, "share_percent")
-    assert not hasattr(finding, "arguments")
-    assert not hasattr(finding, "result")
-    assert not hasattr(finding, "input")
-    assert not hasattr(finding, "output")
-    assert not hasattr(finding, "payload")
-    assert not hasattr(finding, "path")
-    assert not hasattr(finding, "content")
-    assert not hasattr(finding, "prompt")
-    assert not hasattr(finding, "recommendation")
+    _assert_safe_finding(
+        DominantTool(tool_name="Read", call_count=8, total_calls=10, share_percent=80),
+        "tool_name",
+        "call_count",
+        "total_calls",
+        "share_percent",
+    )

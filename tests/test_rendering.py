@@ -15,6 +15,7 @@ from coding_agent_performance.trace.rendering import (
     render_text,
     summary_to_dict,
 )
+from coding_agent_performance.trace.report import TraceSummary
 from coding_agent_performance.trace.storage import CaptureListing
 from coding_agent_performance.trace.summary import summarize_capture
 from tests.helpers.otlp import envelope, number_point, resource_logs, resource_metrics, sum_metric
@@ -65,6 +66,18 @@ def _add_tools(summarizer: IncrementalSummarizer, *records: ToolExecution) -> No
             metric_count=0,
             unsupported=0,
         )
+
+
+def _finish_tools(*records: ToolExecution, filename: str) -> TraceSummary:
+    summarizer = IncrementalSummarizer(filename=filename)
+    _add_tools(summarizer, *records)
+    return summarizer.finish(Path(filename))
+
+
+def _assert_markers_absent(text: str, payload: str, *markers: str) -> None:
+    for marker in markers:
+        assert marker not in text
+        assert marker not in payload
 
 
 def test_json_and_text_are_deterministic_and_private() -> None:
@@ -314,64 +327,36 @@ def test_format_utc_timestamp_normalizes_offset_to_z() -> None:
 
 
 def test_insights_appear_in_text_when_findings_exist() -> None:
-    summarizer = IncrementalSummarizer(filename="insights.jsonl")
-    for _ in range(5):
-        tool = ToolExecution(
-            session_id=None,
-            prompt_id=None,
-            tool_name="Read",
-            success=True,
-            duration_ms=10,
-            input_size_bytes=100,
-            result_size_bytes=200,
-            error_type=None,
-            tool_use_id=None,
-            event_sequence=1,
+    text = render_text(
+        _finish_tools(
+            *(_tool_execution("Read", success=True, event_sequence=1) for _ in range(5)),
+            filename="insights.jsonl",
         )
-        summarizer.add(_envelope("logs", resource_logs([])), (tool,), log_count=1, metric_count=0, unsupported=0)
-    text = render_text(summarizer.finish(Path("insights.jsonl")))
+    )
     assert "Insights" in text
     assert "Repeated tool calls" in text
     assert "- Read: 5 calls" in text
 
 
 def test_insights_not_present_when_no_findings() -> None:
-    summarizer = IncrementalSummarizer(filename="no-insights.jsonl")
-    tool = ToolExecution(
-        session_id=None,
-        prompt_id=None,
-        tool_name="Read",
-        success=True,
-        duration_ms=10,
-        input_size_bytes=100,
-        result_size_bytes=200,
-        error_type=None,
-        tool_use_id=None,
-        event_sequence=1,
+    text = render_text(
+        _finish_tools(
+            _tool_execution("Read", success=True, event_sequence=1),
+            filename="no-insights.jsonl",
+        )
     )
-    summarizer.add(_envelope("logs", resource_logs([])), (tool,), log_count=1, metric_count=0, unsupported=0)
-    text = render_text(summarizer.finish(Path("no-insights.jsonl")))
     assert "Insights" not in text
 
 
 def test_insights_in_json_output() -> None:
-    summarizer = IncrementalSummarizer(filename="insights.jsonl")
-    for i in range(8):
-        tool = ToolExecution(
-            session_id=None,
-            prompt_id=None,
-            tool_name="Read",
-            success=True,
-            duration_ms=10,
-            input_size_bytes=100,
-            result_size_bytes=200,
-            error_type=None,
-            tool_use_id=None,
-            event_sequence=i,
+    parsed = json.loads(
+        render_json(
+            _finish_tools(
+                *(_tool_execution("Read", success=True, event_sequence=i) for i in range(8)),
+                filename="insights.jsonl",
+            )
         )
-        summarizer.add(_envelope("logs", resource_logs([])), (tool,), log_count=1, metric_count=0, unsupported=0)
-    summary = summarizer.finish(Path("insights.jsonl"))
-    parsed = json.loads(render_json(summary))
+    )
     assert "insights" in parsed
     assert "repeated_tool_calls" in parsed["insights"]
     findings = parsed["insights"]["repeated_tool_calls"]
@@ -384,24 +369,12 @@ def test_insights_in_json_output() -> None:
 
 
 def test_insights_multiple_repeated_tools_ordered() -> None:
-    summarizer = IncrementalSummarizer(filename="multi-insights.jsonl")
-    tools_data = [("Zebra", 5), ("Apple", 4), ("Mango", 3)]
-    for tool_name, count in tools_data:
-        for i in range(count):
-            tool = ToolExecution(
-                session_id=None,
-                prompt_id=None,
-                tool_name=tool_name,
-                success=True,
-                duration_ms=10,
-                input_size_bytes=100,
-                result_size_bytes=200,
-                error_type=None,
-                tool_use_id=None,
-                event_sequence=i,
-            )
-            summarizer.add(_envelope("logs", resource_logs([])), (tool,), log_count=1, metric_count=0, unsupported=0)
-    text = render_text(summarizer.finish(Path("multi-insights.jsonl")))
+    records = [
+        _tool_execution(tool_name, success=True, event_sequence=index)
+        for tool_name, count in (("Zebra", 5), ("Apple", 4), ("Mango", 3))
+        for index in range(count)
+    ]
+    text = render_text(_finish_tools(*records, filename="multi-insights.jsonl"))
     assert "- Apple: 4 calls" in text
     assert "- Mango: 3 calls" in text
     assert "- Zebra: 5 calls" in text
@@ -412,30 +385,23 @@ def test_insights_multiple_repeated_tools_ordered() -> None:
 
 
 def test_insights_contain_only_safe_evidence() -> None:
-    summarizer = IncrementalSummarizer(filename="privacy.jsonl")
-    for i in range(5):
-        tool = ToolExecution(
-            session_id="secret-session-id",
-            prompt_id="secret-prompt-id",
-            tool_name="Read",
-            success=True,
-            duration_ms=10,
-            input_size_bytes=100,
-            result_size_bytes=200,
-            error_type=None,
-            tool_use_id="secret-tool-id",
-            event_sequence=i,
-        )
-        summarizer.add(_envelope("logs", resource_logs([])), (tool,), log_count=1, metric_count=0, unsupported=0)
-    summary = summarizer.finish(Path("privacy.jsonl"))
+    summary = _finish_tools(
+        *(
+            _tool_execution(
+                "Read",
+                success=True,
+                event_sequence=i,
+                session_id="secret-session-id",
+                prompt_id="secret-prompt-id",
+                tool_use_id="secret-tool-id",
+            )
+            for i in range(5)
+        ),
+        filename="privacy.jsonl",
+    )
     text = render_text(summary)
     payload = render_json(summary)
-    assert "secret-session-id" not in text
-    assert "secret-prompt-id" not in text
-    assert "secret-tool-id" not in text
-    assert "secret-session-id" not in payload
-    assert "secret-prompt-id" not in payload
-    assert "secret-tool-id" not in payload
+    _assert_markers_absent(text, payload, "secret-session-id", "secret-prompt-id", "secret-tool-id")
     parsed = json.loads(payload)
     for finding in parsed["insights"]["repeated_tool_calls"]:
         assert set(finding.keys()) == {"tool_name", "call_count"}
@@ -445,12 +411,12 @@ def test_insights_contain_only_safe_evidence() -> None:
 
 
 def test_repeated_failed_insights_appear_in_text() -> None:
-    summarizer = IncrementalSummarizer(filename="failed-insights.jsonl")
-    _add_tools(
-        summarizer,
-        *(_tool_execution("Bash", success=False, event_sequence=i, error_type="ShellError") for i in range(4)),
+    text = render_text(
+        _finish_tools(
+            *(_tool_execution("Bash", success=False, event_sequence=i, error_type="ShellError") for i in range(4)),
+            filename="failed-insights.jsonl",
+        )
     )
-    text = render_text(summarizer.finish(Path("failed-insights.jsonl")))
     assert "Insights" in text
     assert "Repeated failed tool calls" in text
     assert "- Bash: 4 failures" in text
@@ -458,9 +424,10 @@ def test_repeated_failed_insights_appear_in_text() -> None:
 
 
 def test_repeated_failed_insights_not_present_when_only_successes() -> None:
-    summarizer = IncrementalSummarizer(filename="success-only.jsonl")
-    _add_tools(summarizer, *(_tool_execution("Bash", success=True, event_sequence=i) for i in range(5)))
-    summary = summarizer.finish(Path("success-only.jsonl"))
+    summary = _finish_tools(
+        *(_tool_execution("Bash", success=True, event_sequence=i) for i in range(5)),
+        filename="success-only.jsonl",
+    )
     text = render_text(summary)
     parsed = json.loads(render_json(summary))
     assert "Repeated tool calls" in text
@@ -469,9 +436,10 @@ def test_repeated_failed_insights_not_present_when_only_successes() -> None:
 
 
 def test_repeated_failed_insights_not_present_below_threshold() -> None:
-    summarizer = IncrementalSummarizer(filename="below-failed.jsonl")
-    _add_tools(summarizer, *(_tool_execution("Bash", success=False, event_sequence=i) for i in range(2)))
-    summary = summarizer.finish(Path("below-failed.jsonl"))
+    summary = _finish_tools(
+        *(_tool_execution("Bash", success=False, event_sequence=i) for i in range(2)),
+        filename="below-failed.jsonl",
+    )
     text = render_text(summary)
     parsed = json.loads(render_json(summary))
     assert "Repeated failed tool calls" not in text
@@ -479,21 +447,24 @@ def test_repeated_failed_insights_not_present_below_threshold() -> None:
 
 
 def test_repeated_failed_insights_in_json_output() -> None:
-    summarizer = IncrementalSummarizer(filename="failed-insights.jsonl")
-    _add_tools(summarizer, *(_tool_execution("Bash", success=False, event_sequence=i) for i in range(4)))
-    parsed = json.loads(render_json(summarizer.finish(Path("failed-insights.jsonl"))))
+    parsed = json.loads(
+        render_json(
+            _finish_tools(
+                *(_tool_execution("Bash", success=False, event_sequence=i) for i in range(4)),
+                filename="failed-insights.jsonl",
+            )
+        )
+    )
     findings = parsed["insights"]["repeated_failed_tool_calls"]
     assert findings == [{"tool_name": "Bash", "failure_count": 4}]
 
 
 def test_repeated_failed_insights_mixed_success_and_failure() -> None:
-    summarizer = IncrementalSummarizer(filename="mixed-failed.jsonl")
-    records = [
+    summary = _finish_tools(
         *(_tool_execution("Bash", success=True, event_sequence=i) for i in range(4)),
         *(_tool_execution("Bash", success=False, event_sequence=i + 4) for i in range(3)),
-    ]
-    _add_tools(summarizer, *records)
-    summary = summarizer.finish(Path("mixed-failed.jsonl"))
+        filename="mixed-failed.jsonl",
+    )
     text = render_text(summary)
     parsed = json.loads(render_json(summary))
     assert "- Bash: 7 calls" in text
@@ -503,16 +474,12 @@ def test_repeated_failed_insights_mixed_success_and_failure() -> None:
 
 
 def test_repeated_failed_insights_multiple_tools_ordered() -> None:
-    summarizer = IncrementalSummarizer(filename="multi-failed.jsonl")
-    tools_data = [("Zebra", 5), ("Apple", 4), ("Mango", 3)]
-    sequence = 0
-    records: list[ToolExecution] = []
-    for tool_name, count in tools_data:
-        for _ in range(count):
-            records.append(_tool_execution(tool_name, success=False, event_sequence=sequence))
-            sequence += 1
-    _add_tools(summarizer, *records)
-    summary = summarizer.finish(Path("multi-failed.jsonl"))
+    records = [
+        _tool_execution(tool_name, success=False, event_sequence=index)
+        for tool_name, count in (("Zebra", 5), ("Apple", 4), ("Mango", 3))
+        for index in range(count)
+    ]
+    summary = _finish_tools(*records, filename="multi-failed.jsonl")
     text = render_text(summary)
     payload = render_json(summary)
     assert "- Apple: 4 failures" in text
@@ -533,9 +500,7 @@ def test_repeated_failed_insights_multiple_tools_ordered() -> None:
 
 
 def test_repeated_failed_insights_contain_only_safe_evidence() -> None:
-    summarizer = IncrementalSummarizer(filename="failed-privacy.jsonl")
-    _add_tools(
-        summarizer,
+    summary = _finish_tools(
         *(
             _tool_execution(
                 "Bash",
@@ -548,11 +513,13 @@ def test_repeated_failed_insights_contain_only_safe_evidence() -> None:
             )
             for i in range(4)
         ),
+        filename="failed-privacy.jsonl",
     )
-    summary = summarizer.finish(Path("failed-privacy.jsonl"))
     text = render_text(summary)
     payload = render_json(summary)
-    for marker in (
+    _assert_markers_absent(
+        text,
+        payload,
         "secret-session-id",
         "secret-prompt-id",
         "secret-tool-id",
@@ -560,38 +527,34 @@ def test_repeated_failed_insights_contain_only_safe_evidence() -> None:
         "traceback",
         "rm -rf",
         "/tmp/",
-    ):
-        assert marker not in text
-        assert marker not in payload
+    )
     parsed = json.loads(payload)
     for finding in parsed["insights"]["repeated_failed_tool_calls"]:
         assert set(finding.keys()) == {"tool_name", "failure_count"}
 
 
 def test_high_tool_result_volume_appears_in_text() -> None:
-    summarizer = IncrementalSummarizer(filename="volume-insights.jsonl")
-    _add_tools(
-        summarizer,
-        _tool_execution("Read", success=True, event_sequence=0, result_size_bytes=196608),
+    text = render_text(
+        _finish_tools(
+            _tool_execution("Read", success=True, event_sequence=0, result_size_bytes=196608),
+            filename="volume-insights.jsonl",
+        )
     )
-    text = render_text(summarizer.finish(Path("volume-insights.jsonl")))
     assert "Insights" in text
     assert "High tool result volume" in text
     assert "- Read: 196608 result bytes" in text
 
 
 def test_high_tool_result_volume_not_present_below_threshold() -> None:
-    summarizer = IncrementalSummarizer(filename="volume-below.jsonl")
-    _add_tools(
-        summarizer,
+    summary = _finish_tools(
         _tool_execution(
             "Read",
             success=True,
             event_sequence=0,
             result_size_bytes=HIGH_TOOL_RESULT_VOLUME_THRESHOLD - 1,
         ),
+        filename="volume-below.jsonl",
     )
-    summary = summarizer.finish(Path("volume-below.jsonl"))
     text = render_text(summary)
     parsed = json.loads(render_json(summary))
     assert "High tool result volume" not in text
@@ -599,12 +562,10 @@ def test_high_tool_result_volume_not_present_below_threshold() -> None:
 
 
 def test_high_tool_result_volume_not_present_when_zero_bytes() -> None:
-    summarizer = IncrementalSummarizer(filename="volume-zero.jsonl")
-    _add_tools(
-        summarizer,
+    summary = _finish_tools(
         _tool_execution("Read", success=True, event_sequence=0, result_size_bytes=0),
+        filename="volume-zero.jsonl",
     )
-    summary = summarizer.finish(Path("volume-zero.jsonl"))
     text = render_text(summary)
     parsed = json.loads(render_json(summary))
     assert "High tool result volume" not in text
@@ -612,42 +573,44 @@ def test_high_tool_result_volume_not_present_when_zero_bytes() -> None:
 
 
 def test_high_tool_result_volume_in_json_output() -> None:
-    summarizer = IncrementalSummarizer(filename="volume-insights.jsonl")
-    _add_tools(
-        summarizer,
-        _tool_execution("Read", success=True, event_sequence=0, result_size_bytes=196608),
+    parsed = json.loads(
+        render_json(
+            _finish_tools(
+                _tool_execution("Read", success=True, event_sequence=0, result_size_bytes=196608),
+                filename="volume-insights.jsonl",
+            )
+        )
     )
-    parsed = json.loads(render_json(summarizer.finish(Path("volume-insights.jsonl"))))
     findings = parsed["insights"]["high_tool_result_volume"]
     assert findings == [{"tool_name": "Read", "result_bytes": 196608}]
 
 
 def test_high_tool_result_volume_at_threshold_in_json_output() -> None:
-    summarizer = IncrementalSummarizer(filename="volume-at-threshold.jsonl")
-    _add_tools(
-        summarizer,
-        _tool_execution(
-            "Read",
-            success=True,
-            event_sequence=0,
-            result_size_bytes=HIGH_TOOL_RESULT_VOLUME_THRESHOLD,
-        ),
+    parsed = json.loads(
+        render_json(
+            _finish_tools(
+                _tool_execution(
+                    "Read",
+                    success=True,
+                    event_sequence=0,
+                    result_size_bytes=HIGH_TOOL_RESULT_VOLUME_THRESHOLD,
+                ),
+                filename="volume-at-threshold.jsonl",
+            )
+        )
     )
-    parsed = json.loads(render_json(summarizer.finish(Path("volume-at-threshold.jsonl"))))
     assert parsed["insights"]["high_tool_result_volume"] == [
         {"tool_name": "Read", "result_bytes": HIGH_TOOL_RESULT_VOLUME_THRESHOLD}
     ]
 
 
 def test_high_tool_result_volume_multiple_tools_ordered() -> None:
-    summarizer = IncrementalSummarizer(filename="multi-volume.jsonl")
-    _add_tools(
-        summarizer,
+    summary = _finish_tools(
         _tool_execution("Zebra", success=True, event_sequence=0, result_size_bytes=196608),
         _tool_execution("Apple", success=True, event_sequence=1, result_size_bytes=147456),
         _tool_execution("Mango", success=True, event_sequence=2, result_size_bytes=HIGH_TOOL_RESULT_VOLUME_THRESHOLD),
+        filename="multi-volume.jsonl",
     )
-    summary = summarizer.finish(Path("multi-volume.jsonl"))
     text = render_text(summary)
     payload = render_json(summary)
     assert "- Apple: 147456 result bytes" in text
@@ -668,8 +631,7 @@ def test_high_tool_result_volume_multiple_tools_ordered() -> None:
 
 
 def test_high_tool_result_volume_coexists_with_existing_insights() -> None:
-    summarizer = IncrementalSummarizer(filename="coexist-insights.jsonl")
-    records = [
+    summary = _finish_tools(
         *(_tool_execution("Read", success=True, event_sequence=i, result_size_bytes=65536) for i in range(3)),
         *(
             _tool_execution(
@@ -681,9 +643,8 @@ def test_high_tool_result_volume_coexists_with_existing_insights() -> None:
             )
             for i in range(3)
         ),
-    ]
-    _add_tools(summarizer, *records)
-    summary = summarizer.finish(Path("coexist-insights.jsonl"))
+        filename="coexist-insights.jsonl",
+    )
     text = render_text(summary)
     parsed = json.loads(render_json(summary))
     assert "- Bash: 3 calls" in text
@@ -708,9 +669,7 @@ def test_high_tool_result_volume_coexists_with_existing_insights() -> None:
 
 
 def test_high_tool_result_volume_contains_only_safe_evidence() -> None:
-    summarizer = IncrementalSummarizer(filename="volume-privacy.jsonl")
-    _add_tools(
-        summarizer,
+    summary = _finish_tools(
         _tool_execution(
             "Read",
             success=True,
@@ -720,20 +679,20 @@ def test_high_tool_result_volume_contains_only_safe_evidence() -> None:
             tool_use_id="secret-tool-id",
             result_size_bytes=196608,
         ),
+        filename="volume-privacy.jsonl",
     )
-    summary = summarizer.finish(Path("volume-privacy.jsonl"))
     text = render_text(summary)
     payload = render_json(summary)
-    for marker in (
+    _assert_markers_absent(
+        text,
+        payload,
         "secret-session-id",
         "secret-prompt-id",
         "secret-tool-id",
         "file contents",
         "/tmp/",
         "arguments",
-    ):
-        assert marker not in text
-        assert marker not in payload
+    )
     parsed = json.loads(payload)
     for finding in parsed["insights"]["high_tool_result_volume"]:
         assert set(finding.keys()) == {"tool_name", "result_bytes"}
@@ -785,9 +744,10 @@ def test_zero_tool_calls_render_explicit_safe_rate() -> None:
 
 
 def test_all_successful_calls_render_full_rate() -> None:
-    summarizer = IncrementalSummarizer(filename="all-success.jsonl")
-    _add_tools(summarizer, *(_tool_execution("Read", success=True, event_sequence=i) for i in range(3)))
-    summary = summarizer.finish(Path("all-success.jsonl"))
+    summary = _finish_tools(
+        *(_tool_execution("Read", success=True, event_sequence=i) for i in range(3)),
+        filename="all-success.jsonl",
+    )
     text = render_text(summary)
     parsed = json.loads(render_json(summary))
     assert parsed["tools"]["calls"] == 3
@@ -802,9 +762,10 @@ def test_all_successful_calls_render_full_rate() -> None:
 
 
 def test_all_failed_calls_render_zero_rate() -> None:
-    summarizer = IncrementalSummarizer(filename="all-failed.jsonl")
-    _add_tools(summarizer, *(_tool_execution("Bash", success=False, event_sequence=i) for i in range(2)))
-    summary = summarizer.finish(Path("all-failed.jsonl"))
+    summary = _finish_tools(
+        *(_tool_execution("Bash", success=False, event_sequence=i) for i in range(2)),
+        filename="all-failed.jsonl",
+    )
     text = render_text(summary)
     parsed = json.loads(render_json(summary))
     assert parsed["tools"]["calls"] == 2
@@ -818,14 +779,12 @@ def test_all_failed_calls_render_zero_rate() -> None:
 
 
 def test_mixed_calls_render_exact_counts_and_stable_rate() -> None:
-    summarizer = IncrementalSummarizer(filename="mixed-health.jsonl")
-    records = [
+    summary = _finish_tools(
         _tool_execution("Read", success=True, event_sequence=0),
         _tool_execution("Read", success=True, event_sequence=1),
         _tool_execution("Bash", success=False, event_sequence=2),
-    ]
-    _add_tools(summarizer, *records)
-    summary = summarizer.finish(Path("mixed-health.jsonl"))
+        filename="mixed-health.jsonl",
+    )
     text = render_text(summary)
     payload = render_json(summary)
     parsed = json.loads(payload)
@@ -866,13 +825,13 @@ def test_tool_health_text_and_json_agree_on_fixture() -> None:
 
 
 def test_high_tool_failure_rate_appears_in_text() -> None:
-    summarizer = IncrementalSummarizer(filename="failure-rate-insights.jsonl")
-    records = [
-        *(_tool_execution("Bash", success=True, event_sequence=i) for i in range(2)),
-        *(_tool_execution("Bash", success=False, event_sequence=i + 2, error_type="ShellError") for i in range(2)),
-    ]
-    _add_tools(summarizer, *records)
-    text = render_text(summarizer.finish(Path("failure-rate-insights.jsonl")))
+    text = render_text(
+        _finish_tools(
+            *(_tool_execution("Bash", success=True, event_sequence=i) for i in range(2)),
+            *(_tool_execution("Bash", success=False, event_sequence=i + 2, error_type="ShellError") for i in range(2)),
+            filename="failure-rate-insights.jsonl",
+        )
+    )
     assert "Insights" in text
     assert "High tool failure rate" in text
     assert "- Bash: 2 failed of 4 calls (1/2)" in text
@@ -880,9 +839,10 @@ def test_high_tool_failure_rate_appears_in_text() -> None:
 
 
 def test_high_tool_failure_rate_not_present_below_min_calls() -> None:
-    summarizer = IncrementalSummarizer(filename="failure-rate-small.jsonl")
-    _add_tools(summarizer, *(_tool_execution("Bash", success=False, event_sequence=i) for i in range(2)))
-    summary = summarizer.finish(Path("failure-rate-small.jsonl"))
+    summary = _finish_tools(
+        *(_tool_execution("Bash", success=False, event_sequence=i) for i in range(2)),
+        filename="failure-rate-small.jsonl",
+    )
     text = render_text(summary)
     parsed = json.loads(render_json(summary))
     assert "High tool failure rate" not in text
@@ -890,13 +850,11 @@ def test_high_tool_failure_rate_not_present_below_min_calls() -> None:
 
 
 def test_high_tool_failure_rate_not_present_below_rate_threshold() -> None:
-    summarizer = IncrementalSummarizer(filename="failure-rate-below.jsonl")
-    records = [
+    summary = _finish_tools(
         *(_tool_execution("Bash", success=True, event_sequence=i) for i in range(2)),
         _tool_execution("Bash", success=False, event_sequence=2),
-    ]
-    _add_tools(summarizer, *records)
-    summary = summarizer.finish(Path("failure-rate-below.jsonl"))
+        filename="failure-rate-below.jsonl",
+    )
     text = render_text(summary)
     parsed = json.loads(render_json(summary))
     assert "High tool failure rate" not in text
@@ -904,13 +862,15 @@ def test_high_tool_failure_rate_not_present_below_rate_threshold() -> None:
 
 
 def test_high_tool_failure_rate_in_json_output() -> None:
-    summarizer = IncrementalSummarizer(filename="failure-rate-insights.jsonl")
-    records = [
-        *(_tool_execution("Bash", success=True, event_sequence=i) for i in range(2)),
-        *(_tool_execution("Bash", success=False, event_sequence=i + 2) for i in range(2)),
-    ]
-    _add_tools(summarizer, *records)
-    parsed = json.loads(render_json(summarizer.finish(Path("failure-rate-insights.jsonl"))))
+    parsed = json.loads(
+        render_json(
+            _finish_tools(
+                *(_tool_execution("Bash", success=True, event_sequence=i) for i in range(2)),
+                *(_tool_execution("Bash", success=False, event_sequence=i + 2) for i in range(2)),
+                filename="failure-rate-insights.jsonl",
+            )
+        )
+    )
     assert parsed["insights"]["high_tool_failure_rate"] == [
         {
             "tool_name": "Bash",
@@ -922,13 +882,15 @@ def test_high_tool_failure_rate_in_json_output() -> None:
 
 
 def test_high_tool_failure_rate_above_boundaries_in_json_output() -> None:
-    summarizer = IncrementalSummarizer(filename="failure-rate-above.jsonl")
-    records = [
-        *(_tool_execution("Bash", success=True, event_sequence=i) for i in range(2)),
-        *(_tool_execution("Bash", success=False, event_sequence=i + 2) for i in range(4)),
-    ]
-    _add_tools(summarizer, *records)
-    parsed = json.loads(render_json(summarizer.finish(Path("failure-rate-above.jsonl"))))
+    parsed = json.loads(
+        render_json(
+            _finish_tools(
+                *(_tool_execution("Bash", success=True, event_sequence=i) for i in range(2)),
+                *(_tool_execution("Bash", success=False, event_sequence=i + 2) for i in range(4)),
+                filename="failure-rate-above.jsonl",
+            )
+        )
+    )
     assert parsed["insights"]["high_tool_failure_rate"] == [
         {
             "tool_name": "Bash",
@@ -940,11 +902,9 @@ def test_high_tool_failure_rate_above_boundaries_in_json_output() -> None:
 
 
 def test_high_tool_failure_rate_multiple_tools_ordered() -> None:
-    summarizer = IncrementalSummarizer(filename="multi-failure-rate.jsonl")
-    tools_data = [("Zebra", 5, 5), ("Apple", 2, 4), ("Mango", 3, 3)]
-    sequence = 0
     records: list[ToolExecution] = []
-    for tool_name, failures, calls in tools_data:
+    sequence = 0
+    for tool_name, failures, calls in (("Zebra", 5, 5), ("Apple", 2, 4), ("Mango", 3, 3)):
         successes = calls - failures
         for _ in range(successes):
             records.append(_tool_execution(tool_name, success=True, event_sequence=sequence))
@@ -952,8 +912,7 @@ def test_high_tool_failure_rate_multiple_tools_ordered() -> None:
         for _ in range(failures):
             records.append(_tool_execution(tool_name, success=False, event_sequence=sequence))
             sequence += 1
-    _add_tools(summarizer, *records)
-    summary = summarizer.finish(Path("multi-failure-rate.jsonl"))
+    summary = _finish_tools(*records, filename="multi-failure-rate.jsonl")
     text = render_text(summary)
     payload = render_json(summary)
     assert "- Apple: 2 failed of 4 calls (1/2)" in text
@@ -975,8 +934,7 @@ def test_high_tool_failure_rate_multiple_tools_ordered() -> None:
 
 
 def test_high_tool_failure_rate_coexists_with_existing_insights() -> None:
-    summarizer = IncrementalSummarizer(filename="coexist-failure-rate.jsonl")
-    records = [
+    summary = _finish_tools(
         *(_tool_execution("Read", success=True, event_sequence=i, result_size_bytes=65536) for i in range(3)),
         *(
             _tool_execution(
@@ -989,9 +947,8 @@ def test_high_tool_failure_rate_coexists_with_existing_insights() -> None:
             for i in range(4)
         ),
         *(_tool_execution("Bash", success=True, event_sequence=i + 7, result_size_bytes=0) for i in range(2)),
-    ]
-    _add_tools(summarizer, *records)
-    summary = summarizer.finish(Path("coexist-failure-rate.jsonl"))
+        filename="coexist-failure-rate.jsonl",
+    )
     text = render_text(summary)
     parsed = json.loads(render_json(summary))
     assert "- Bash: 6 calls" in text
@@ -1016,9 +973,7 @@ def test_high_tool_failure_rate_coexists_with_existing_insights() -> None:
 
 
 def test_high_tool_failure_rate_contains_only_safe_evidence() -> None:
-    summarizer = IncrementalSummarizer(filename="failure-rate-privacy.jsonl")
-    _add_tools(
-        summarizer,
+    summary = _finish_tools(
         *(
             _tool_execution(
                 "Bash",
@@ -1031,11 +986,13 @@ def test_high_tool_failure_rate_contains_only_safe_evidence() -> None:
             )
             for i in range(4)
         ),
+        filename="failure-rate-privacy.jsonl",
     )
-    summary = summarizer.finish(Path("failure-rate-privacy.jsonl"))
     text = render_text(summary)
     payload = render_json(summary)
-    for marker in (
+    _assert_markers_absent(
+        text,
+        payload,
         "secret-session-id",
         "secret-prompt-id",
         "secret-tool-id",
@@ -1044,9 +1001,7 @@ def test_high_tool_failure_rate_contains_only_safe_evidence() -> None:
         "rm -rf",
         "/tmp/",
         "arguments",
-    ):
-        assert marker not in text
-        assert marker not in payload
+    )
     parsed = json.loads(payload)
     for finding in parsed["insights"]["high_tool_failure_rate"]:
         assert set(finding.keys()) == {"tool_name", "failed_calls", "total_calls", "failure_rate"}
@@ -1058,22 +1013,23 @@ def test_high_tool_failure_rate_contains_only_safe_evidence() -> None:
 
 
 def test_dominant_tool_appears_in_text() -> None:
-    summarizer = IncrementalSummarizer(filename="dominant-insights.jsonl")
-    _add_tools(
-        summarizer,
-        *(_tool_execution("Read", success=True, event_sequence=i) for i in range(8)),
-        *(_tool_execution("Grep", success=True, event_sequence=i + 8) for i in range(2)),
+    text = render_text(
+        _finish_tools(
+            *(_tool_execution("Read", success=True, event_sequence=i) for i in range(8)),
+            *(_tool_execution("Grep", success=True, event_sequence=i + 8) for i in range(2)),
+            filename="dominant-insights.jsonl",
+        )
     )
-    text = render_text(summarizer.finish(Path("dominant-insights.jsonl")))
     assert "Insights" in text
     assert "Dominant tool" in text
     assert "- Read: 8/10 calls (80%)" in text
 
 
 def test_dominant_tool_not_present_below_minimum_sample() -> None:
-    summarizer = IncrementalSummarizer(filename="dominant-below-sample.jsonl")
-    _add_tools(summarizer, *(_tool_execution("Read", success=True, event_sequence=i) for i in range(9)))
-    summary = summarizer.finish(Path("dominant-below-sample.jsonl"))
+    summary = _finish_tools(
+        *(_tool_execution("Read", success=True, event_sequence=i) for i in range(9)),
+        filename="dominant-below-sample.jsonl",
+    )
     text = render_text(summary)
     parsed = json.loads(render_json(summary))
     assert "Dominant tool" not in text
@@ -1081,13 +1037,11 @@ def test_dominant_tool_not_present_below_minimum_sample() -> None:
 
 
 def test_dominant_tool_not_present_below_share_threshold() -> None:
-    summarizer = IncrementalSummarizer(filename="dominant-below-share.jsonl")
-    _add_tools(
-        summarizer,
+    summary = _finish_tools(
         *(_tool_execution("Read", success=True, event_sequence=i) for i in range(5)),
         *(_tool_execution("Grep", success=True, event_sequence=i + 5) for i in range(5)),
+        filename="dominant-below-share.jsonl",
     )
-    summary = summarizer.finish(Path("dominant-below-share.jsonl"))
     text = render_text(summary)
     parsed = json.loads(render_json(summary))
     assert "Dominant tool" not in text
@@ -1095,13 +1049,15 @@ def test_dominant_tool_not_present_below_share_threshold() -> None:
 
 
 def test_dominant_tool_at_threshold_in_json_output() -> None:
-    summarizer = IncrementalSummarizer(filename="dominant-at-threshold.jsonl")
-    _add_tools(
-        summarizer,
-        *(_tool_execution("Read", success=True, event_sequence=i) for i in range(6)),
-        *(_tool_execution("Grep", success=True, event_sequence=i + 6) for i in range(4)),
+    parsed = json.loads(
+        render_json(
+            _finish_tools(
+                *(_tool_execution("Read", success=True, event_sequence=i) for i in range(6)),
+                *(_tool_execution("Grep", success=True, event_sequence=i + 6) for i in range(4)),
+                filename="dominant-at-threshold.jsonl",
+            )
+        )
     )
-    parsed = json.loads(render_json(summarizer.finish(Path("dominant-at-threshold.jsonl"))))
     assert parsed["insights"]["dominant_tool"] == {
         "tool_name": "Read",
         "call_count": 6,
@@ -1111,13 +1067,15 @@ def test_dominant_tool_at_threshold_in_json_output() -> None:
 
 
 def test_dominant_tool_in_json_output() -> None:
-    summarizer = IncrementalSummarizer(filename="dominant-insights.jsonl")
-    _add_tools(
-        summarizer,
-        *(_tool_execution("Read", success=True, event_sequence=i) for i in range(8)),
-        *(_tool_execution("Grep", success=True, event_sequence=i + 8) for i in range(2)),
+    parsed = json.loads(
+        render_json(
+            _finish_tools(
+                *(_tool_execution("Read", success=True, event_sequence=i) for i in range(8)),
+                *(_tool_execution("Grep", success=True, event_sequence=i + 8) for i in range(2)),
+                filename="dominant-insights.jsonl",
+            )
+        )
     )
-    parsed = json.loads(render_json(summarizer.finish(Path("dominant-insights.jsonl"))))
     assert parsed["insights"]["dominant_tool"] == {
         "tool_name": "Read",
         "call_count": 8,
@@ -1127,13 +1085,11 @@ def test_dominant_tool_in_json_output() -> None:
 
 
 def test_dominant_tool_text_and_json_are_deterministic() -> None:
-    summarizer = IncrementalSummarizer(filename="dominant-deterministic.jsonl")
-    _add_tools(
-        summarizer,
+    summary = _finish_tools(
         *(_tool_execution("Read", success=True, event_sequence=i) for i in range(8)),
         *(_tool_execution("Grep", success=True, event_sequence=i + 8) for i in range(2)),
+        filename="dominant-deterministic.jsonl",
     )
-    summary = summarizer.finish(Path("dominant-deterministic.jsonl"))
     text = render_text(summary)
     payload = render_json(summary)
     assert render_text(summary) == text
@@ -1149,8 +1105,7 @@ def test_dominant_tool_text_and_json_are_deterministic() -> None:
 
 
 def test_dominant_tool_coexists_with_existing_insights() -> None:
-    summarizer = IncrementalSummarizer(filename="dominant-coexist.jsonl")
-    records = [
+    summary = _finish_tools(
         *(_tool_execution("Read", success=True, event_sequence=i, result_size_bytes=24576) for i in range(8)),
         *(
             _tool_execution(
@@ -1162,9 +1117,8 @@ def test_dominant_tool_coexists_with_existing_insights() -> None:
             )
             for i in range(3)
         ),
-    ]
-    _add_tools(summarizer, *records)
-    summary = summarizer.finish(Path("dominant-coexist.jsonl"))
+        filename="dominant-coexist.jsonl",
+    )
     text = render_text(summary)
     parsed = json.loads(render_json(summary))
     assert "- Read: 8 calls" in text
@@ -1196,9 +1150,7 @@ def test_dominant_tool_coexists_with_existing_insights() -> None:
 
 
 def test_dominant_tool_contains_only_safe_evidence() -> None:
-    summarizer = IncrementalSummarizer(filename="dominant-privacy.jsonl")
-    _add_tools(
-        summarizer,
+    summary = _finish_tools(
         *(
             _tool_execution(
                 "Read",
@@ -1211,11 +1163,13 @@ def test_dominant_tool_contains_only_safe_evidence() -> None:
             for i in range(8)
         ),
         *(_tool_execution("Grep", success=True, event_sequence=i + 8) for i in range(2)),
+        filename="dominant-privacy.jsonl",
     )
-    summary = summarizer.finish(Path("dominant-privacy.jsonl"))
     text = render_text(summary)
     payload = render_json(summary)
-    for marker in (
+    _assert_markers_absent(
+        text,
+        payload,
         "secret-session-id",
         "secret-prompt-id",
         "secret-tool-id",
@@ -1224,9 +1178,7 @@ def test_dominant_tool_contains_only_safe_evidence() -> None:
         "arguments",
         "should use Grep",
         "inefficient",
-    ):
-        assert marker not in text
-        assert marker not in payload
+    )
     parsed = json.loads(payload)
     finding = parsed["insights"]["dominant_tool"]
     assert finding is not None

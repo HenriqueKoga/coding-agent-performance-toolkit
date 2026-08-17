@@ -1,6 +1,6 @@
 """Deterministic insight rules over trace summaries."""
 
-from math import gcd
+from collections.abc import Iterable
 
 from coding_agent_performance.trace.report import (
     DominantTool,
@@ -10,6 +10,7 @@ from coding_agent_performance.trace.report import (
     Insights,
     RepeatedFailedToolCall,
     RepeatedToolCall,
+    ToolBreakdown,
     ToolStats,
 )
 
@@ -28,13 +29,11 @@ def detect_repeated_tool_calls(tools: ToolStats) -> tuple[RepeatedToolCall, ...]
 
     Returns findings ordered deterministically by tool name.
     """
-    findings = [
+    return tuple(
         RepeatedToolCall(tool_name=breakdown.name, call_count=breakdown.calls)
-        for breakdown in tools.by_name
+        for breakdown in _breakdowns_by_name(tools)
         if breakdown.calls >= REPEATED_TOOL_CALL_THRESHOLD
-    ]
-    findings.sort(key=lambda f: f.tool_name)
-    return tuple(findings)
+    )
 
 
 def detect_repeated_failed_tool_calls(tools: ToolStats) -> tuple[RepeatedFailedToolCall, ...]:
@@ -43,13 +42,11 @@ def detect_repeated_failed_tool_calls(tools: ToolStats) -> tuple[RepeatedFailedT
     Returns findings ordered deterministically by tool name. Successful calls
     do not increment the failure count.
     """
-    findings = [
+    return tuple(
         RepeatedFailedToolCall(tool_name=breakdown.name, failure_count=breakdown.failures)
-        for breakdown in tools.by_name
+        for breakdown in _breakdowns_by_name(tools)
         if breakdown.failures >= REPEATED_FAILED_TOOL_CALL_THRESHOLD
-    ]
-    findings.sort(key=lambda f: f.tool_name)
-    return tuple(findings)
+    )
 
 
 def detect_high_tool_result_volume(tools: ToolStats) -> tuple[HighToolResultVolume, ...]:
@@ -59,13 +56,11 @@ def detect_high_tool_result_volume(tools: ToolStats) -> tuple[HighToolResultVolu
     applies to per-tool cumulative `result_bytes` within one capture, not to
     any individual tool call.
     """
-    findings = [
+    return tuple(
         HighToolResultVolume(tool_name=breakdown.name, result_bytes=breakdown.result_bytes)
-        for breakdown in tools.by_name
+        for breakdown in _breakdowns_by_name(tools)
         if breakdown.result_bytes >= HIGH_TOOL_RESULT_VOLUME_THRESHOLD
-    ]
-    findings.sort(key=lambda f: f.tool_name)
-    return tuple(findings)
+    )
 
 
 def detect_high_tool_failure_rate(tools: ToolStats) -> tuple[HighToolFailureRate, ...]:
@@ -74,18 +69,16 @@ def detect_high_tool_failure_rate(tools: ToolStats) -> tuple[HighToolFailureRate
     Returns findings ordered deterministically by tool name. Rate comparison
     uses integer cross-multiplication so threshold checks stay exact.
     """
-    findings = [
+    return tuple(
         HighToolFailureRate(
             tool_name=breakdown.name,
             failed_calls=breakdown.failures,
             total_calls=breakdown.calls,
-            failure_rate=_exact_failure_rate(breakdown.failures, breakdown.calls),
+            failure_rate=FailureRate.reduced(breakdown.failures, breakdown.calls),
         )
-        for breakdown in tools.by_name
+        for breakdown in _breakdowns_by_name(tools)
         if _meets_high_failure_rate(breakdown.calls, breakdown.failures)
-    ]
-    findings.sort(key=lambda f: f.tool_name)
-    return tuple(findings)
+    )
 
 
 def detect_dominant_tool(tools: ToolStats) -> DominantTool | None:
@@ -99,13 +92,14 @@ def detect_dominant_tool(tools: ToolStats) -> DominantTool | None:
     total_calls = tools.calls
     if total_calls < DOMINANT_TOOL_MIN_TOTAL_CALLS or not tools.by_name:
         return None
-    max_calls = max(breakdown.calls for breakdown in tools.by_name)
-    if max_calls * 100 < total_calls * DOMINANT_TOOL_SHARE_THRESHOLD_PERCENT:
+    winner = min(tools.by_name, key=lambda breakdown: (-breakdown.calls, breakdown.name))
+    if not _ratio_at_least(
+        winner.calls,
+        total_calls,
+        DOMINANT_TOOL_SHARE_THRESHOLD_PERCENT,
+        100,
+    ):
         return None
-    winner = min(
-        (breakdown for breakdown in tools.by_name if breakdown.calls == max_calls),
-        key=lambda breakdown: breakdown.name,
-    )
     return DominantTool(
         tool_name=winner.name,
         call_count=winner.calls,
@@ -125,12 +119,23 @@ def compute_insights(tools: ToolStats) -> Insights:
     )
 
 
+def _breakdowns_by_name(tools: ToolStats) -> Iterable[ToolBreakdown]:
+    return sorted(tools.by_name, key=lambda breakdown: breakdown.name)
+
+
 def _meets_high_failure_rate(calls: int, failures: int) -> bool:
-    if calls < HIGH_TOOL_FAILURE_RATE_MIN_CALLS:
-        return False
-    return failures * HIGH_TOOL_FAILURE_RATE_THRESHOLD_DENOMINATOR >= calls * HIGH_TOOL_FAILURE_RATE_THRESHOLD_NUMERATOR
+    return calls >= HIGH_TOOL_FAILURE_RATE_MIN_CALLS and _ratio_at_least(
+        failures,
+        calls,
+        HIGH_TOOL_FAILURE_RATE_THRESHOLD_NUMERATOR,
+        HIGH_TOOL_FAILURE_RATE_THRESHOLD_DENOMINATOR,
+    )
 
 
-def _exact_failure_rate(failed_calls: int, total_calls: int) -> FailureRate:
-    divisor = gcd(failed_calls, total_calls)
-    return FailureRate(numerator=failed_calls // divisor, denominator=total_calls // divisor)
+def _ratio_at_least(
+    numerator: int,
+    denominator: int,
+    threshold_numerator: int,
+    threshold_denominator: int,
+) -> bool:
+    return numerator * threshold_denominator >= denominator * threshold_numerator

@@ -1,6 +1,7 @@
 """Immutable DTOs for a finished trace summary."""
 
 from dataclasses import dataclass
+from math import gcd
 from typing import Literal
 
 type UsageSource = Literal["api_request_events", "otel_metrics", "none"]
@@ -175,6 +176,11 @@ class HighToolResultVolume:
 class FailureRate:
     numerator: int
     denominator: int
+
+    @classmethod
+    def reduced(cls, failed_calls: int, total_calls: int) -> FailureRate:
+        divisor = gcd(failed_calls, total_calls)
+        return cls(numerator=failed_calls // divisor, denominator=total_calls // divisor)
 
 
 @dataclass(frozen=True, slots=True)
