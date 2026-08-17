@@ -232,3 +232,128 @@ def test_render_capture_listing_is_deterministic() -> None:
 def test_format_utc_timestamp_normalizes_offset_to_z() -> None:
     value = datetime(2026, 8, 17, 13, 25, 9, tzinfo=timezone(timedelta(hours=-3)))
     assert format_utc_timestamp(value) == "2026-08-17T16:25:09Z"
+
+
+def test_insights_appear_in_text_when_findings_exist() -> None:
+    summarizer = IncrementalSummarizer(filename="insights.jsonl")
+    for _ in range(5):
+        tool = ToolExecution(
+            session_id=None,
+            prompt_id=None,
+            tool_name="Read",
+            success=True,
+            duration_ms=10,
+            input_size_bytes=100,
+            result_size_bytes=200,
+            error_type=None,
+            tool_use_id=None,
+            event_sequence=1,
+        )
+        summarizer.add(_envelope("logs", resource_logs([])), (tool,), log_count=1, metric_count=0, unsupported=0)
+    text = render_text(summarizer.finish(Path("insights.jsonl")))
+    assert "Insights" in text
+    assert "Repeated tool calls" in text
+    assert "- Read: 5 calls" in text
+
+
+def test_insights_not_present_when_no_findings() -> None:
+    summarizer = IncrementalSummarizer(filename="no-insights.jsonl")
+    tool = ToolExecution(
+        session_id=None,
+        prompt_id=None,
+        tool_name="Read",
+        success=True,
+        duration_ms=10,
+        input_size_bytes=100,
+        result_size_bytes=200,
+        error_type=None,
+        tool_use_id=None,
+        event_sequence=1,
+    )
+    summarizer.add(_envelope("logs", resource_logs([])), (tool,), log_count=1, metric_count=0, unsupported=0)
+    text = render_text(summarizer.finish(Path("no-insights.jsonl")))
+    assert "Insights" not in text
+
+
+def test_insights_in_json_output() -> None:
+    summarizer = IncrementalSummarizer(filename="insights.jsonl")
+    for i in range(8):
+        tool = ToolExecution(
+            session_id=None,
+            prompt_id=None,
+            tool_name="Read",
+            success=True,
+            duration_ms=10,
+            input_size_bytes=100,
+            result_size_bytes=200,
+            error_type=None,
+            tool_use_id=None,
+            event_sequence=i,
+        )
+        summarizer.add(_envelope("logs", resource_logs([])), (tool,), log_count=1, metric_count=0, unsupported=0)
+    summary = summarizer.finish(Path("insights.jsonl"))
+    parsed = json.loads(render_json(summary))
+    assert "insights" in parsed
+    assert "repeated_tool_calls" in parsed["insights"]
+    findings = parsed["insights"]["repeated_tool_calls"]
+    assert len(findings) == 1
+    assert findings[0]["tool_name"] == "Read"
+    assert findings[0]["call_count"] == 8
+
+
+def test_insights_multiple_repeated_tools_ordered() -> None:
+    summarizer = IncrementalSummarizer(filename="multi-insights.jsonl")
+    tools_data = [("Zebra", 5), ("Apple", 4), ("Mango", 3)]
+    for tool_name, count in tools_data:
+        for i in range(count):
+            tool = ToolExecution(
+                session_id=None,
+                prompt_id=None,
+                tool_name=tool_name,
+                success=True,
+                duration_ms=10,
+                input_size_bytes=100,
+                result_size_bytes=200,
+                error_type=None,
+                tool_use_id=None,
+                event_sequence=i,
+            )
+            summarizer.add(_envelope("logs", resource_logs([])), (tool,), log_count=1, metric_count=0, unsupported=0)
+    text = render_text(summarizer.finish(Path("multi-insights.jsonl")))
+    assert "- Apple: 4 calls" in text
+    assert "- Mango: 3 calls" in text
+    assert "- Zebra: 5 calls" in text
+    apple_pos = text.index("- Apple: 4 calls")
+    mango_pos = text.index("- Mango: 3 calls")
+    zebra_pos = text.index("- Zebra: 5 calls")
+    assert apple_pos < mango_pos < zebra_pos
+
+
+def test_insights_contain_only_safe_evidence() -> None:
+    summarizer = IncrementalSummarizer(filename="privacy.jsonl")
+    for i in range(5):
+        tool = ToolExecution(
+            session_id="secret-session-id",
+            prompt_id="secret-prompt-id",
+            tool_name="Read",
+            success=True,
+            duration_ms=10,
+            input_size_bytes=100,
+            result_size_bytes=200,
+            error_type=None,
+            tool_use_id="secret-tool-id",
+            event_sequence=i,
+        )
+        summarizer.add(_envelope("logs", resource_logs([])), (tool,), log_count=1, metric_count=0, unsupported=0)
+    summary = summarizer.finish(Path("privacy.jsonl"))
+    text = render_text(summary)
+    payload = render_json(summary)
+    assert "secret-session-id" not in text
+    assert "secret-prompt-id" not in text
+    assert "secret-tool-id" not in text
+    assert "secret-session-id" not in payload
+    assert "secret-prompt-id" not in payload
+    assert "secret-tool-id" not in payload
+    parsed = json.loads(payload)
+    for finding in parsed["insights"]["repeated_tool_calls"]:
+        assert set(finding.keys()) == {"tool_name", "call_count"}

@@ -36,6 +36,7 @@ a summary has been generated.
 | `tools` | object | Tool call counts and durations |
 | `activity` | object | Active time, lines, commits, and edit decisions |
 | `coverage` | object | Decode coverage and warnings |
+| `insights` | object | Deterministic findings from analysis rules |
 
 Numbers are finite. Missing statistics use `null`, never `NaN` or `Infinity`.
 `by_model`, `by_query_source`, and `by_name` are sorted by their name field.
@@ -73,3 +74,20 @@ Unknown events and metrics are counted by name only.
 
 `coverage.unknown_otlp_values` counts `AnyValue` fields that could not be
 decoded. The original values are not included.
+
+## Insights
+
+`insights.repeated_tool_calls` is an array of findings. Each finding identifies a
+tool whose call count met or exceeded the deterministic threshold (currently 3)
+within the summarized capture.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `tool_name` | string | The tool that was called repeatedly |
+| `call_count` | integer | The observed number of calls |
+
+Findings are ordered deterministically by tool name. The array is empty when no
+tools meet the threshold.
+
+Insight findings contain only allowlisted evidence. Tool arguments, results,
+prompts, identifiers, and absolute paths are never included.

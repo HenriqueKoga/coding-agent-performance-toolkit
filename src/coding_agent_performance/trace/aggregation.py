@@ -8,6 +8,7 @@ from typing import Final
 
 from coding_agent_performance.trace.capture import CaptureEnvelope, CaptureError
 from coding_agent_performance.trace.cost import usd_to_micros
+from coding_agent_performance.trace.insights import compute_insights
 from coding_agent_performance.trace.records import (
     ActivityMeasurement,
     AggregationTemporality,
@@ -199,6 +200,7 @@ class IncrementalSummarizer:
             raise CaptureError(path, "no recognized telemetry")
         capture = self._capture
         sessions = self._sessions
+        tools = self._tool_stats()
         return TraceSummary(
             schema_version=SUMMARY_SCHEMA_VERSION,
             capture=CaptureInfo(
@@ -218,7 +220,7 @@ class IncrementalSummarizer:
                 subagents_completed=sessions.subagents_completed,
             ),
             model_usage=self._model_usage(),
-            tools=self._tool_stats(),
+            tools=tools,
             activity=self._activity_stats(),
             coverage=CoverageStats(
                 log_records=coverage.log_records,
@@ -231,6 +233,7 @@ class IncrementalSummarizer:
                 unknown_metrics=tuple(sorted(coverage.unknown_metrics.items())),
                 warnings=tuple(coverage.warnings),
             ),
+            insights=compute_insights(tools),
         )
 
     def _ingest(self, record: DomainRecord) -> None:
