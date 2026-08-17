@@ -15,7 +15,7 @@ body:
 
         Field IDs are a future automation contract. Do not rename them without an explicit compatibility decision.
 
-        Lifecycle (manual until automation exists):
+        Lifecycle:
 
         ```text
         needs:design
@@ -27,6 +27,8 @@ body:
         ```
 
         Use `agent:blocked` when the task cannot continue. Only a human may apply `agent:ready`.
+
+        After `agent:ready`, GitHub Actions updates labels when a pull request uses the template `Closes #<issue>` form: opening the PR moves the Issue to `agent:working` and copies that Issue's `risk:*` label to the PR; marking that PR ready for review moves the Issue to `needs:human-review`. Merge still closes the Issue through GitHub's normal `Closes #N` behavior.
   - type: textarea
     id: context
     attributes:

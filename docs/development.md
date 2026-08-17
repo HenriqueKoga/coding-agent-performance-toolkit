@@ -45,6 +45,7 @@ src/coding_agent_performance/
     trace/                 Collect, store, decode, summarize, and render
 docs/                      Product, architecture, development, and ADRs
 tests/                     Synthetic fixtures and focused tests
+.github/                   Issue/PR templates, CI, and Agent Task lifecycle automation
 ```
 
 Related documents:
@@ -85,7 +86,22 @@ Reviews behavior, types, privacy, performance, tests, and documentation. Cites c
 
 ### Human owner
 
-Sets priorities. Approves scope changes. Decides trade-offs. Authorizes external or destructive actions. Approves the merge.
+Sets priorities. Approves scope changes. Decides trade-offs. Authorizes external or destructive actions. Approves the merge. A human is the only actor allowed to apply `agent:ready`.
+
+### Repository lifecycle automation
+
+GitHub Actions maintains Agent Task labels after a human has applied `agent:ready`. The implementation agent must not orchestrate those transitions.
+
+A pull request whose body contains exactly one `Closes #<issue>` line, matching the pull-request template:
+
+- moves the linked Issue from `agent:ready` to `agent:working` when the PR is opened, and copies that Issue's single `risk:*` label to the PR
+- moves the linked Issue from `agent:working` to `needs:human-review` when the PR is marked ready for review
+
+Unexpected lifecycle states, including a missing lifecycle label, produce a diagnostic and leave labels unchanged. Invalid risk classification, conflicting labels, and ambiguous `Closes #<issue>` links still fail.
+
+`agent:ready` is never applied automatically. Risk classification is never inferred. Merged PRs close Issues through GitHub's normal `Closes #N` behavior.
+
+Parsing and transition rules live in `.github/scripts/agent_lifecycle.py` and are tested locally. Applying labels, GitHub event delivery, and token permissions require the real `pull_request` workflow environment and are not reproduced by the local test suite.
 
 ## Issue and task contract
 

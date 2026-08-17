@@ -1,0 +1,81 @@
+name: Agent lifecycle
+
+on:
+  pull_request:
+    types:
+      - opened
+      - ready_for_review
+
+concurrency:
+  group: agent-lifecycle-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  bookkeep:
+    name: Sync Agent Task labels
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Check out lifecycle scripts
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Plan and apply lifecycle labels
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          issue="$(python .github/scripts/agent_lifecycle.py parse-link --event-file "${GITHUB_EVENT_PATH}")"
+
+          issue_labels_json="$(
+            gh issue view "${issue}" --json labels --jq '[.labels[].name]'
+          )"
+          pr_labels_json="$(
+            jq -c '[.pull_request.labels[].name]' "${GITHUB_EVENT_PATH}"
+          )"
+
+          plan="$(
+            python .github/scripts/agent_lifecycle.py plan \
+              --event-file "${GITHUB_EVENT_PATH}" \
+              --issue-labels-json "${issue_labels_json}" \
+              --pr-labels-json "${pr_labels_json}"
+          )"
+
+          jq -r '.message' <<<"${plan}"
+
+          issue_args=()
+          while IFS= read -r label; do
+            [[ -z "${label}" ]] && continue
+            issue_args+=(--add-label "${label}")
+          done < <(jq -r '.issue_add[]' <<<"${plan}")
+          while IFS= read -r label; do
+            [[ -z "${label}" ]] && continue
+            issue_args+=(--remove-label "${label}")
+          done < <(jq -r '.issue_remove[]' <<<"${plan}")
+          if ((${#issue_args[@]} > 0)); then
+            gh issue edit "${issue}" "${issue_args[@]}"
+          fi
+
+          pr_args=()
+          while IFS= read -r label; do
+            [[ -z "${label}" ]] && continue
+            pr_args+=(--add-label "${label}")
+          done < <(jq -r '.pr_add[]' <<<"${plan}")
+          if ((${#pr_args[@]} > 0)); then
+            gh pr edit "${PR_NUMBER}" "${pr_args[@]}"
+          fi
