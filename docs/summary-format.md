@@ -116,5 +116,29 @@ oversized.
 Findings are ordered deterministically by tool name. The array is empty when no
 tools meet the threshold.
 
+`insights.high_tool_failure_rate` is an array of findings. Each finding
+identifies a tool whose explicit failure rate met both deterministic
+thresholds within the summarized capture: at least 3 calls, and a failure
+rate of at least 1/2. Only normalized failure/error outcomes are counted.
+Successful calls do not increment the failed-call count.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `tool_name` | string | The tool with a high failure rate |
+| `failed_calls` | integer | The observed number of explicit failures |
+| `total_calls` | integer | The observed number of calls |
+| `failure_rate` | object | Exact reduced ratio of failed calls to total calls |
+
+`failure_rate` uses integers only:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `numerator` | integer | Failed calls in lowest terms |
+| `denominator` | integer | Total calls in lowest terms |
+
+Threshold comparison uses integer cross-multiplication, not floating-point
+division. Findings are ordered deterministically by tool name. The array is
+empty when no tools meet both thresholds.
+
 Insight findings contain only allowlisted evidence. Tool arguments, results,
 error payloads, prompts, identifiers, and absolute paths are never included.

@@ -157,10 +157,25 @@ class HighToolResultVolume:
 
 
 @dataclass(frozen=True, slots=True)
+class FailureRate:
+    numerator: int
+    denominator: int
+
+
+@dataclass(frozen=True, slots=True)
+class HighToolFailureRate:
+    tool_name: str
+    failed_calls: int
+    total_calls: int
+    failure_rate: FailureRate
+
+
+@dataclass(frozen=True, slots=True)
 class Insights:
     repeated_tool_calls: tuple[RepeatedToolCall, ...]
     repeated_failed_tool_calls: tuple[RepeatedFailedToolCall, ...]
     high_tool_result_volume: tuple[HighToolResultVolume, ...]
+    high_tool_failure_rate: tuple[HighToolFailureRate, ...]
 
 
 @dataclass(frozen=True, slots=True)
