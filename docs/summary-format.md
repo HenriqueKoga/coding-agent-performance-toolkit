@@ -89,5 +89,18 @@ within the summarized capture.
 Findings are ordered deterministically by tool name. The array is empty when no
 tools meet the threshold.
 
+`insights.repeated_failed_tool_calls` is an array of findings. Each finding
+identifies a tool whose explicit failure count met or exceeded the deterministic
+threshold (currently 3) within the summarized capture. Only normalized
+failure/error outcomes are counted. Successful calls do not increment the count.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `tool_name` | string | The tool that failed repeatedly |
+| `failure_count` | integer | The observed number of explicit failures |
+
+Findings are ordered deterministically by tool name. The array is empty when no
+tools meet the threshold.
+
 Insight findings contain only allowlisted evidence. Tool arguments, results,
-prompts, identifiers, and absolute paths are never included.
+error payloads, prompts, identifiers, and absolute paths are never included.

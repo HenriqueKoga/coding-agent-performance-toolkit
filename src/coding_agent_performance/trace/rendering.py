@@ -5,7 +5,13 @@ import unicodedata
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from coding_agent_performance.trace.report import DurationStats, ToolBreakdown, TraceSummary, UsageSource
+from coding_agent_performance.trace.report import (
+    DurationStats,
+    Insights,
+    ToolBreakdown,
+    TraceSummary,
+    UsageSource,
+)
 from coding_agent_performance.trace.storage import CaptureListing
 
 _USAGE_SOURCE_LABELS: dict[UsageSource, str] = {
@@ -138,6 +144,13 @@ def summary_to_dict(summary: TraceSummary) -> dict[str, object]:
                 }
                 for finding in summary.insights.repeated_tool_calls
             ],
+            "repeated_failed_tool_calls": [
+                {
+                    "tool_name": finding.tool_name,
+                    "failure_count": finding.failure_count,
+                }
+                for finding in summary.insights.repeated_failed_tool_calls
+            ],
         },
     }
 
@@ -178,10 +191,9 @@ def render_text(summary: TraceSummary) -> str:
     ]
     if tools.by_name:
         sections.extend(["", _tool_table(tools.by_name)])
-    if insights.repeated_tool_calls:
-        sections.extend(["", "Insights", "Repeated tool calls"])
-        for finding in insights.repeated_tool_calls:
-            sections.append(f"- {finding.tool_name}: {finding.call_count} calls")
+    insight_lines = _insight_lines(insights)
+    if insight_lines:
+        sections.extend(["", "Insights", *insight_lines])
     sections.extend(
         [
             "",
@@ -239,6 +251,20 @@ def _duration_short(stats: DurationStats) -> str:
 
 def _seconds(value: int | float) -> str:
     return f"{value / 1000:.2f}s"
+
+
+def _insight_lines(insights: Insights) -> list[str]:
+    lines: list[str] = []
+    if insights.repeated_tool_calls:
+        lines.append("Repeated tool calls")
+        lines.extend(f"- {finding.tool_name}: {finding.call_count} calls" for finding in insights.repeated_tool_calls)
+    if insights.repeated_failed_tool_calls:
+        lines.append("Repeated failed tool calls")
+        lines.extend(
+            f"- {finding.tool_name}: {finding.failure_count} failures"
+            for finding in insights.repeated_failed_tool_calls
+        )
+    return lines
 
 
 def _tool_table(rows: tuple[ToolBreakdown, ...]) -> str:
