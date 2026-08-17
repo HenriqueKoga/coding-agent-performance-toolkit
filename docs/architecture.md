@@ -28,6 +28,7 @@ In scope today:
 - Environment diagnostics for Python, Git, Claude Code, and Codex
 - A loopback-only OTLP HTTP/JSON receiver for Claude Code logs and metrics
 - Versioned JSONL envelopes on the local filesystem
+- Read-only listing of eligible local captures
 - Streaming validation of those envelopes
 - OTLP HTTP/JSON decoding
 - Claude Code allowlist normalization
@@ -70,7 +71,7 @@ src/coding_agent_performance/
     adapters/claude_code/normalizer.py  Allowlist mapping onto domain records
     trace/cli.py                        `capt trace` arguments, errors, and exit codes
     trace/collector.py                  OTLP HTTP/JSON receiver
-    trace/storage.py                    Exclusive JSONL capture writer and latest-capture selection
+    trace/storage.py                    Exclusive JSONL capture writer, listing, and latest-capture selection
     trace/capture.py                    Shared envelope schema and streaming reader
     trace/json_codec.py                 Strict JSON parsing for collector and reader
     trace/otel.py                       Generic OTLP HTTP/JSON decoder
@@ -79,14 +80,14 @@ src/coding_agent_performance/
     trace/cost.py                       Safe USD to microdollar conversion
     trace/aggregation.py                Incremental summarizer and statistics
     trace/summary.py                    Capture-to-summary use case
-    trace/rendering.py                  Allowlist JSON dict plus text/JSON output
+    trace/rendering.py                  Allowlist JSON dict plus text/JSON summary and capture-list output
 ```
 
 The Claude Code adapter knows official export configuration and how to map Claude Code log and metric names onto small domain records. It does not start Claude Code, edit `~/.claude/settings.json`, or keep prompt, response, or tool content.
 
 The collector does not know Claude Code. It accepts `POST /v1/logs` and `POST /v1/metrics`, persists the JSON object as received, and counts successful batches. It does not interpret OTLP resource attributes.
 
-Storage writes one compact JSON line per HTTP request. The reader validates those envelopes in streaming mode and never loads the whole file. `capt trace summarize` accepts an explicit path or `--latest`, which selects the newest eligible `.jsonl` file in the default capture directory without following symbolic links.
+Storage writes one compact JSON line per HTTP request. The reader validates those envelopes in streaming mode and never loads the whole file. `capt trace list` scans the default capture directory for eligible `.jsonl` files and prints filename, size in bytes, and UTC modification time without opening capture contents. `capt trace summarize` accepts an explicit path or `--latest`, which selects the newest eligible `.jsonl` file in the default capture directory without following symbolic links. Listing and `--latest` share the same eligibility and newest-first ordering rules.
 
 The OTLP decoder understands `AnyValue`, `resourceLogs`, and `resourceMetrics` only. It does not import the Claude Code adapter.
 

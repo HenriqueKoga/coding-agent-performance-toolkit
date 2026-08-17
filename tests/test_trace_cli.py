@@ -26,6 +26,7 @@ def test_trace_help(visible: Callable[[str], str]) -> None:
     assert result.exit_code == 0
     text = visible(result.output)
     assert "collect" in text
+    assert "list" in text
     assert "summarize" in text
 
 

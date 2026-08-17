@@ -1,11 +1,20 @@
 import json
-from datetime import datetime
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 from coding_agent_performance.trace.aggregation import IncrementalSummarizer
 from coding_agent_performance.trace.capture import CaptureEnvelope
 from coding_agent_performance.trace.records import ToolExecution
-from coding_agent_performance.trace.rendering import render_json, render_text, summary_to_dict
+from coding_agent_performance.trace.rendering import (
+    escape_filename,
+    format_utc_timestamp,
+    render_capture_list,
+    render_capture_listing,
+    render_json,
+    render_text,
+    summary_to_dict,
+)
+from coding_agent_performance.trace.storage import CaptureListing
 from coding_agent_performance.trace.summary import summarize_capture
 from tests.helpers.otlp import envelope, number_point, resource_logs, resource_metrics, sum_metric
 from tests.helpers.synthetic_capture import FIXTURE_PATH, SENSITIVE_MARKERS
@@ -186,3 +195,40 @@ def test_zero_cost_and_missing_durations_render_placeholders() -> None:
     text = render_text(summarizer.finish(Path("life.jsonl")))
     assert "$0.000000" in text
     assert "n/a" in text
+
+
+def test_escape_filename_keeps_one_logical_line() -> None:
+    escaped = escape_filename("bad\nname\twith\rcr\x1b[31m.jsonl")
+    assert "\n" not in escaped
+    assert "\r" not in escaped
+    assert "\t" not in escaped
+    assert "\x1b" not in escaped
+    assert escaped == "bad\\nname\\twith\\rcr\\x1b[31m.jsonl"
+
+
+def test_escape_filename_handles_unicode_separators_and_backslashes() -> None:
+    escaped = escape_filename("a\\b\u2028c\u2029d\x85e\U000e0001.jsonl")
+    assert escaped == "a\\\\b\\u2028c\\u2029d\\x85e\\U000e0001.jsonl"
+    assert "\u2028" not in escaped
+    assert "\u2029" not in escaped
+    assert "\x85" not in escaped
+    assert "\U000e0001" not in escaped
+
+
+def test_render_capture_list_empty() -> None:
+    assert render_capture_list(()) == "No capture files found."
+
+
+def test_render_capture_listing_is_deterministic() -> None:
+    listing = CaptureListing(
+        name="capture.jsonl",
+        size_bytes=42,
+        modified_at=datetime(2026, 8, 17, 16, 25, 9, tzinfo=UTC),
+    )
+    assert render_capture_listing(listing) == "capture.jsonl  42  2026-08-17T16:25:09Z"
+    assert format_utc_timestamp(listing.modified_at).endswith("Z")
+
+
+def test_format_utc_timestamp_normalizes_offset_to_z() -> None:
+    value = datetime(2026, 8, 17, 13, 25, 9, tzinfo=timezone(timedelta(hours=-3)))
+    assert format_utc_timestamp(value) == "2026-08-17T16:25:09Z"

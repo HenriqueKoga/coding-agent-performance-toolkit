@@ -1,8 +1,12 @@
 """Allowlist serialization and deterministic text/JSON rendering."""
 
 import json
+import unicodedata
+from collections.abc import Sequence
+from datetime import UTC, datetime
 
 from coding_agent_performance.trace.report import DurationStats, ToolBreakdown, TraceSummary, UsageSource
+from coding_agent_performance.trace.storage import CaptureListing
 
 _USAGE_SOURCE_LABELS: dict[UsageSource, str] = {
     "api_request_events": "API request events",
@@ -242,3 +246,44 @@ def _truncate(value: str, width: int) -> str:
 def _tool_name_width(rows: tuple[ToolBreakdown, ...]) -> int:
     widest = max((len(row.name) for row in rows), default=_TOOL_NAME_MIN_WIDTH)
     return min(_TOOL_NAME_MAX_WIDTH, max(_TOOL_NAME_MIN_WIDTH, widest))
+
+
+def render_capture_list(captures: Sequence[CaptureListing]) -> str:
+    if not captures:
+        return "No capture files found."
+    return "\n".join(render_capture_listing(item) for item in captures)
+
+
+def render_capture_listing(listing: CaptureListing) -> str:
+    return f"{escape_filename(listing.name)}  {listing.size_bytes}  {format_utc_timestamp(listing.modified_at)}"
+
+
+def format_utc_timestamp(value: datetime) -> str:
+    return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def escape_filename(name: str) -> str:
+    pieces: list[str] = []
+    for char in name:
+        match char:
+            case "\\":
+                pieces.append("\\\\")
+            case "\n":
+                pieces.append("\\n")
+            case "\r":
+                pieces.append("\\r")
+            case "\t":
+                pieces.append("\\t")
+            case _:
+                category = unicodedata.category(char)
+                if category.startswith("C") or category in {"Zl", "Zp"}:
+                    code = ord(char)
+                    if code <= 0xFF:
+                        pieces.append(f"\\x{code:02x}")
+                    elif code <= 0xFFFF:
+                        pieces.append(f"\\u{code:04x}")
+                    else:
+                        pieces.append(f"\\U{code:08x}")
+                else:
+                    pieces.append(char)
+    return "".join(pieces)
