@@ -6,8 +6,9 @@ import pytest
 
 from coding_agent_performance.trace.capture import CaptureError
 from coding_agent_performance.trace.rendering import render_json, render_text
+from coding_agent_performance.trace.report import RepeatedFailedToolCall
 from coding_agent_performance.trace.summary import summarize_capture
-from tests.helpers.otlp import envelope, number_point, resource_logs, resource_metrics, sum_metric
+from tests.helpers.otlp import envelope, log_record, number_point, resource_logs, resource_metrics, sum_metric
 from tests.helpers.synthetic_capture import FIXTURE_PATH, write_synthetic_capture
 
 
@@ -225,3 +226,68 @@ def test_overflow_numeric_values_do_not_interrupt_summary(tmp_path: Path) -> Non
     assert summary.sessions.prompts == 1
     assert summary.activity.commits == 0
     assert summary.coverage.unknown_otlp_values >= 2
+
+
+def test_repeated_failed_tool_calls_use_explicit_success_outcome(tmp_path: Path) -> None:
+    records = [
+        log_record(
+            event_name="tool_result",
+            attributes={
+                "tool_name": "Bash",
+                "success": False,
+                "duration_ms": 10,
+                "error_type": "ShellError",
+                "error": "Connection timed out to api.example.invalid",
+                "tool_input": {"command": "rm -rf /tmp/synthetic-project"},
+            },
+        )
+        for _ in range(4)
+    ]
+    records.extend(
+        log_record(
+            event_name="tool_result",
+            attributes={
+                "tool_name": "Bash",
+                "success": True,
+                "duration_ms": 10,
+                "tool_result": "error: this successful output mentions failure",
+            },
+        )
+        for _ in range(2)
+    )
+    path = tmp_path / "explicit-failures.jsonl"
+    path.write_text(json.dumps(envelope(signal="logs", payload=resource_logs(records))) + "\n", encoding="utf-8")
+    summary = summarize_capture(path)
+    assert summary.tools.calls == 6
+    assert summary.tools.failures == 4
+    assert summary.insights.repeated_tool_calls[0].call_count == 6
+    assert summary.insights.repeated_failed_tool_calls == (RepeatedFailedToolCall(tool_name="Bash", failure_count=4),)
+    text = render_text(summary)
+    payload = render_json(summary)
+    for marker in (
+        "Connection timed out to api.example.invalid",
+        "rm -rf /tmp/synthetic-project",
+        "this successful output mentions failure",
+        "ShellError",
+    ):
+        assert marker not in text
+        assert marker not in payload
+
+
+def test_missing_success_is_not_counted_as_failure(tmp_path: Path) -> None:
+    records = [
+        log_record(
+            event_name="tool_result",
+            attributes={
+                "tool_name": "Bash",
+                "error_type": "ShellError",
+                "error": "Connection timed out to api.example.invalid",
+            },
+        )
+        for _ in range(4)
+    ]
+    path = tmp_path / "missing-success.jsonl"
+    path.write_text(json.dumps(envelope(signal="logs", payload=resource_logs(records))) + "\n", encoding="utf-8")
+    summary = summarize_capture(path)
+    assert summary.tools.failures == 0
+    assert summary.insights.repeated_failed_tool_calls == ()

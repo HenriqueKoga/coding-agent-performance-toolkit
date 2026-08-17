@@ -30,6 +30,41 @@ def _envelope(signal: str, payload: dict[str, object]) -> CaptureEnvelope:
     )
 
 
+def _tool_execution(
+    tool_name: str,
+    *,
+    success: bool,
+    event_sequence: int,
+    session_id: str | None = None,
+    prompt_id: str | None = None,
+    error_type: str | None = None,
+    tool_use_id: str | None = None,
+) -> ToolExecution:
+    return ToolExecution(
+        session_id=session_id,
+        prompt_id=prompt_id,
+        tool_name=tool_name,
+        success=success,
+        duration_ms=10,
+        input_size_bytes=100,
+        result_size_bytes=200,
+        error_type=error_type,
+        tool_use_id=tool_use_id,
+        event_sequence=event_sequence,
+    )
+
+
+def _add_tools(summarizer: IncrementalSummarizer, *records: ToolExecution) -> None:
+    for record in records:
+        summarizer.add(
+            _envelope("logs", resource_logs([])),
+            (record,),
+            log_count=1,
+            metric_count=0,
+            unsupported=0,
+        )
+
+
 def test_json_and_text_are_deterministic_and_private() -> None:
     summary = summarize_capture(FIXTURE_PATH)
     text = render_text(summary)
@@ -63,6 +98,15 @@ def test_json_allowlist_keeps_v1_activity_keys() -> None:
     assert set(activity["active_time_seconds"]) == {"user", "cli"}
     assert set(activity["lines_of_code"]) == {"added", "removed"}
     assert set(activity["code_edit_decisions"]) == {"accepted", "rejected"}
+
+
+def test_json_allowlist_keeps_insight_keys() -> None:
+    summary = summarize_capture(FIXTURE_PATH)
+    payload = summary_to_dict(summary)
+    insights = payload["insights"]
+    assert isinstance(insights, dict)
+    assert set(insights) == {"repeated_tool_calls", "repeated_failed_tool_calls"}
+    assert insights["repeated_failed_tool_calls"] == []
 
 
 def test_text_usage_source_labels() -> None:
@@ -299,6 +343,7 @@ def test_insights_in_json_output() -> None:
     assert len(findings) == 1
     assert findings[0]["tool_name"] == "Read"
     assert findings[0]["call_count"] == 8
+    assert parsed["insights"]["repeated_failed_tool_calls"] == []
 
 
 def test_insights_multiple_repeated_tools_ordered() -> None:
@@ -357,3 +402,128 @@ def test_insights_contain_only_safe_evidence() -> None:
     parsed = json.loads(payload)
     for finding in parsed["insights"]["repeated_tool_calls"]:
         assert set(finding.keys()) == {"tool_name", "call_count"}
+    assert parsed["insights"]["repeated_failed_tool_calls"] == []
+
+
+def test_repeated_failed_insights_appear_in_text() -> None:
+    summarizer = IncrementalSummarizer(filename="failed-insights.jsonl")
+    _add_tools(
+        summarizer,
+        *(_tool_execution("Bash", success=False, event_sequence=i, error_type="ShellError") for i in range(4)),
+    )
+    text = render_text(summarizer.finish(Path("failed-insights.jsonl")))
+    assert "Insights" in text
+    assert "Repeated failed tool calls" in text
+    assert "- Bash: 4 failures" in text
+    assert "ShellError" not in text
+
+
+def test_repeated_failed_insights_not_present_when_only_successes() -> None:
+    summarizer = IncrementalSummarizer(filename="success-only.jsonl")
+    _add_tools(summarizer, *(_tool_execution("Bash", success=True, event_sequence=i) for i in range(5)))
+    summary = summarizer.finish(Path("success-only.jsonl"))
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert "Repeated tool calls" in text
+    assert "Repeated failed tool calls" not in text
+    assert parsed["insights"]["repeated_failed_tool_calls"] == []
+
+
+def test_repeated_failed_insights_not_present_below_threshold() -> None:
+    summarizer = IncrementalSummarizer(filename="below-failed.jsonl")
+    _add_tools(summarizer, *(_tool_execution("Bash", success=False, event_sequence=i) for i in range(2)))
+    summary = summarizer.finish(Path("below-failed.jsonl"))
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert "Repeated failed tool calls" not in text
+    assert parsed["insights"]["repeated_failed_tool_calls"] == []
+
+
+def test_repeated_failed_insights_in_json_output() -> None:
+    summarizer = IncrementalSummarizer(filename="failed-insights.jsonl")
+    _add_tools(summarizer, *(_tool_execution("Bash", success=False, event_sequence=i) for i in range(4)))
+    parsed = json.loads(render_json(summarizer.finish(Path("failed-insights.jsonl"))))
+    findings = parsed["insights"]["repeated_failed_tool_calls"]
+    assert findings == [{"tool_name": "Bash", "failure_count": 4}]
+
+
+def test_repeated_failed_insights_mixed_success_and_failure() -> None:
+    summarizer = IncrementalSummarizer(filename="mixed-failed.jsonl")
+    records = [
+        *(_tool_execution("Bash", success=True, event_sequence=i) for i in range(4)),
+        *(_tool_execution("Bash", success=False, event_sequence=i + 4) for i in range(3)),
+    ]
+    _add_tools(summarizer, *records)
+    summary = summarizer.finish(Path("mixed-failed.jsonl"))
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert "- Bash: 7 calls" in text
+    assert "- Bash: 3 failures" in text
+    assert parsed["insights"]["repeated_tool_calls"] == [{"tool_name": "Bash", "call_count": 7}]
+    assert parsed["insights"]["repeated_failed_tool_calls"] == [{"tool_name": "Bash", "failure_count": 3}]
+
+
+def test_repeated_failed_insights_multiple_tools_ordered() -> None:
+    summarizer = IncrementalSummarizer(filename="multi-failed.jsonl")
+    tools_data = [("Zebra", 5), ("Apple", 4), ("Mango", 3)]
+    sequence = 0
+    records: list[ToolExecution] = []
+    for tool_name, count in tools_data:
+        for _ in range(count):
+            records.append(_tool_execution(tool_name, success=False, event_sequence=sequence))
+            sequence += 1
+    _add_tools(summarizer, *records)
+    summary = summarizer.finish(Path("multi-failed.jsonl"))
+    text = render_text(summary)
+    payload = render_json(summary)
+    assert "- Apple: 4 failures" in text
+    assert "- Mango: 3 failures" in text
+    assert "- Zebra: 5 failures" in text
+    apple_pos = text.index("- Apple: 4 failures")
+    mango_pos = text.index("- Mango: 3 failures")
+    zebra_pos = text.index("- Zebra: 5 failures")
+    assert apple_pos < mango_pos < zebra_pos
+    parsed = json.loads(payload)
+    assert [finding["tool_name"] for finding in parsed["insights"]["repeated_failed_tool_calls"]] == [
+        "Apple",
+        "Mango",
+        "Zebra",
+    ]
+    assert render_text(summary) == text
+    assert render_json(summary) == payload
+
+
+def test_repeated_failed_insights_contain_only_safe_evidence() -> None:
+    summarizer = IncrementalSummarizer(filename="failed-privacy.jsonl")
+    _add_tools(
+        summarizer,
+        *(
+            _tool_execution(
+                "Bash",
+                success=False,
+                event_sequence=i,
+                session_id="secret-session-id",
+                prompt_id="secret-prompt-id",
+                error_type="ShellError",
+                tool_use_id="secret-tool-id",
+            )
+            for i in range(4)
+        ),
+    )
+    summary = summarizer.finish(Path("failed-privacy.jsonl"))
+    text = render_text(summary)
+    payload = render_json(summary)
+    for marker in (
+        "secret-session-id",
+        "secret-prompt-id",
+        "secret-tool-id",
+        "ShellError",
+        "traceback",
+        "rm -rf",
+        "/tmp/",
+    ):
+        assert marker not in text
+        assert marker not in payload
+    parsed = json.loads(payload)
+    for finding in parsed["insights"]["repeated_failed_tool_calls"]:
+        assert set(finding.keys()) == {"tool_name", "failure_count"}

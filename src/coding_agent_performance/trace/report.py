@@ -145,8 +145,15 @@ class RepeatedToolCall:
 
 
 @dataclass(frozen=True, slots=True)
+class RepeatedFailedToolCall:
+    tool_name: str
+    failure_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class Insights:
     repeated_tool_calls: tuple[RepeatedToolCall, ...]
+    repeated_failed_tool_calls: tuple[RepeatedFailedToolCall, ...]
 
 
 @dataclass(frozen=True, slots=True)
