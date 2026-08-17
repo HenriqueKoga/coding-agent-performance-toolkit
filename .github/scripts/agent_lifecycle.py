@@ -98,11 +98,18 @@ def load_pull_request_event(path: Path) -> PullRequestEvent:
         body = body_value
     else:
         raise LifecycleError("pull request body is not a string")
-    match payload.get("action"):
+    draft = pull_request.get("draft") is True
+    return PullRequestEvent(action=_planning_action(payload.get("action"), draft), body=body)
+
+
+def _planning_action(event_action: object, draft: bool) -> PullRequestAction:
+    match event_action:
         case "opened":
-            return PullRequestEvent(action="opened", body=body)
+            return "opened"
         case "ready_for_review":
-            return PullRequestEvent(action="ready_for_review", body=body)
+            return "ready_for_review"
+        case "synchronize":
+            return "opened" if draft else "ready_for_review"
         case _:
             raise LifecycleError("GitHub event action is not a supported pull_request lifecycle event")
 
@@ -115,17 +122,17 @@ def plan_lifecycle(
 ) -> LifecyclePlan:
     """Plan Issue and PR label mutations, or raise without a partial plan."""
     risk = _require_single_risk(issue_number, issue_labels)
-    lifecycle = _require_single_lifecycle(issue_number, issue_labels)
+    lifecycle = _optional_lifecycle(issue_number, issue_labels)
     match action:
         case "opened":
             return _plan_opened(issue_number, lifecycle, risk, pr_labels)
         case "ready_for_review":
-            return _plan_ready_for_review(issue_number, lifecycle, risk)
+            return _plan_ready_for_review(issue_number, lifecycle, risk, pr_labels)
 
 
 def _plan_opened(
     issue_number: int,
-    lifecycle: LifecycleLabel,
+    lifecycle: LifecycleLabel | None,
     risk: RiskLabel,
     pr_labels: Sequence[str],
 ) -> LifecyclePlan:
@@ -154,15 +161,14 @@ def _plan_opened(
             pr_add=pr_add,
             message=f"Issue #{issue_number} already {AGENT_WORKING}; copy {risk} to the pull request",
         )
-    raise LifecycleError(
-        f"Issue #{issue_number} lifecycle is {lifecycle}; expected {AGENT_READY} for pull_request opened"
-    )
+    return _no_transition(issue_number, lifecycle, AGENT_READY, "opened")
 
 
 def _plan_ready_for_review(
     issue_number: int,
-    lifecycle: LifecycleLabel,
+    lifecycle: LifecycleLabel | None,
     risk: RiskLabel,
+    pr_labels: Sequence[str],
 ) -> LifecyclePlan:
     if lifecycle == AGENT_WORKING:
         return LifecyclePlan(
@@ -180,8 +186,37 @@ def _plan_ready_for_review(
             pr_add=(),
             message=f"Issue #{issue_number} already {NEEDS_HUMAN_REVIEW}; {risk} unchanged",
         )
-    raise LifecycleError(
-        f"Issue #{issue_number} lifecycle is {lifecycle}; expected {AGENT_WORKING} for pull_request ready_for_review"
+    if lifecycle is None:
+        pr_add = _risk_label_to_add(issue_number, risk, pr_labels)
+        return LifecyclePlan(
+            issue_number=issue_number,
+            issue_add=(NEEDS_HUMAN_REVIEW,),
+            issue_remove=(),
+            pr_add=pr_add,
+            message=(
+                f"Issue #{issue_number} has no lifecycle label; "
+                f"add {NEEDS_HUMAN_REVIEW} for pull_request ready_for_review"
+            ),
+        )
+    return _no_transition(issue_number, lifecycle, AGENT_WORKING, "ready_for_review")
+
+
+def _no_transition(
+    issue_number: int,
+    lifecycle: LifecycleLabel | None,
+    expected: LifecycleLabel,
+    event_name: str,
+) -> LifecyclePlan:
+    actual = "absent" if lifecycle is None else lifecycle
+    return LifecyclePlan(
+        issue_number=issue_number,
+        issue_add=(),
+        issue_remove=(),
+        pr_add=(),
+        message=(
+            f"Issue #{issue_number} lifecycle is {actual}; expected {expected} for pull_request {event_name}; "
+            "no label changes"
+        ),
     )
 
 
@@ -195,10 +230,10 @@ def _require_single_risk(issue_number: int, labels: Sequence[str]) -> RiskLabel:
     return risks[0]
 
 
-def _require_single_lifecycle(issue_number: int, labels: Sequence[str]) -> LifecycleLabel:
+def _optional_lifecycle(issue_number: int, labels: Sequence[str]) -> LifecycleLabel | None:
     present = tuple(label for label in LIFECYCLE_LABELS if label in labels)
     if not present:
-        raise LifecycleError(f"Issue #{issue_number} has no supported lifecycle label")
+        return None
     if len(present) > 1:
         rendered = ", ".join(present)
         raise LifecycleError(f"Issue #{issue_number} has multiple lifecycle labels: {rendered}")
