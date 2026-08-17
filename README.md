@@ -164,9 +164,11 @@ uv run capt trace summarize --help
 Project documents:
 
 - [AGENTS.md](AGENTS.md) — how agents should work in this repository
+- [.specify/memory/constitution.md](.specify/memory/constitution.md) — durable product and engineering principles
 - [docs/product.md](docs/product.md) — product intent and direction
 - [docs/architecture.md](docs/architecture.md) — system structure
 - [docs/development.md](docs/development.md) — setup, workflow, and delivery
+- [docs/spec-kit.md](docs/spec-kit.md) — Spec Kit specification workflow
 - [docs/decisions/README.md](docs/decisions/README.md) — architecture decisions
 
 ## Roadmap

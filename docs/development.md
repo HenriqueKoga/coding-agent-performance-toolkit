@@ -44,7 +44,10 @@ src/coding_agent_performance/
     diagnostics.py         `capt doctor`
     adapters/claude_code/  Official export settings and allowlist normalizer
     trace/                 Collect, store, decode, summarize, and render
-docs/                      Product, architecture, development, and ADRs
+docs/                      Product, architecture, development, Spec Kit guide, and ADRs
+specs/                     Spec Kit feature specifications (not runtime code)
+.specify/                  Spec Kit constitution, templates, and scripts
+.cursor/skills/            Committed Spec Kit Cursor skills
 tests/                     Synthetic fixtures and focused tests
 .github/                   Issue/PR templates, CI, Agent Task lifecycle, Cursor dispatch, and Codex rework
 ```
@@ -54,20 +57,25 @@ Related documents:
 - [architecture.md](architecture.md)
 - [product.md](product.md)
 - [summary-format.md](summary-format.md)
+- [spec-kit.md](spec-kit.md)
 - [decisions/README.md](decisions/README.md)
+- [`.specify/memory/constitution.md`](../.specify/memory/constitution.md)
 
 ## Development workflow
 
 1. Start from an up-to-date `main`.
-2. Create a focused branch with a `feat/`, `fix/`, `refactor/`, `docs/`, `test/`, or `chore/` prefix.
-3. Read the documents relevant to the change.
-4. Write or update tests first when behavior changes.
-5. Implement incrementally.
-6. Run targeted tests while developing.
-7. Run the full validation set before delivery.
-8. Review `git diff`.
-9. Update documentation when contracts, architecture, or workflow change.
-10. Open a pull request. Do not merge it automatically.
+2. For new roadmap work, specify the change with Spec Kit before opening an Agent Task Issue. See [spec-kit.md](spec-kit.md).
+3. Create a focused branch with a `feat/`, `fix/`, `refactor/`, `docs/`, `test/`, or `chore/` prefix.
+4. Read the documents relevant to the change.
+5. Write or update tests first when behavior changes.
+6. Implement incrementally.
+7. Run targeted tests while developing.
+8. Run the full validation set before delivery.
+9. Review `git diff`.
+10. Update documentation when contracts, architecture, or workflow change.
+11. Open a pull request. Do not merge it automatically.
+
+Spec Kit is development tooling invoked with pinned `uvx` or `uv tool`. It is not a CAPT runtime dependency. `/speckit.implement` is not the production implementation path. `/speckit.taskstoissues` is not used. GitHub Issue creation stays a manual Agent Task template step. Only a human applies `agent:ready`.
 
 ## Agent-assisted workflow
 
@@ -75,7 +83,7 @@ The same tool may play more than one role. Keep the handoffs explicit.
 
 ### Planning agent
 
-Turns a goal into acceptance criteria. Names risks and out-of-scope items. Does not silently implement unapproved requirements.
+Turns a goal into Spec Kit constitution-aligned specification artifacts, then into a GitHub Agent Task Issue. Names risks and out-of-scope items. Does not silently implement unapproved requirements. Does not apply `agent:ready` or risk labels.
 
 ### Implementation agent
 
