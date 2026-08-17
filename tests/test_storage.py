@@ -376,6 +376,60 @@ def test_list_captures_excludes_symlinks(tmp_path: Path) -> None:
     assert latest_capture(tmp_path) == real
 
 
+def test_list_captures_limit_returns_newest_prefix(tmp_path: Path) -> None:
+    _touch_capture(tmp_path, "oldest.jsonl", 1_000)
+    _touch_capture(tmp_path, "middle.jsonl", 2_000)
+    _touch_capture(tmp_path, "newest.jsonl", 3_000)
+
+    listed = list_captures(tmp_path, limit=2)
+
+    assert [item.name for item in listed] == ["newest.jsonl", "middle.jsonl"]
+    assert latest_capture(tmp_path) == tmp_path / listed[0].name
+
+
+def test_list_captures_limit_larger_than_available(tmp_path: Path) -> None:
+    _touch_capture(tmp_path, "only.jsonl", 1_000)
+
+    listed = list_captures(tmp_path, limit=10)
+
+    assert [item.name for item in listed] == ["only.jsonl"]
+
+
+def test_list_captures_limit_one_matches_latest(tmp_path: Path) -> None:
+    _touch_capture(tmp_path, "older.jsonl", 1_000)
+    _touch_capture(tmp_path, "newer.jsonl", 2_000)
+
+    listed = list_captures(tmp_path, limit=1)
+
+    assert [item.name for item in listed] == ["newer.jsonl"]
+    assert latest_capture(tmp_path) == tmp_path / listed[0].name
+
+
+def test_list_captures_limit_missing_directory(tmp_path: Path) -> None:
+    missing = tmp_path / "captures"
+    assert list_captures(missing, limit=1) == ()
+
+
+def test_list_captures_limit_empty_directory(tmp_path: Path) -> None:
+    assert list_captures(tmp_path, limit=5) == ()
+
+
+def test_list_captures_limit_does_not_open_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _touch_capture(tmp_path, "capture.jsonl", 1_000)
+
+    def fail_open(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("capture files must not be opened")
+
+    monkeypatch.setattr("builtins.open", fail_open)
+    monkeypatch.setattr(Path, "open", fail_open)
+    monkeypatch.setattr(Path, "read_bytes", fail_open)
+    monkeypatch.setattr(Path, "read_text", fail_open)
+
+    listed = list_captures(tmp_path, limit=1)
+
+    assert [item.name for item in listed] == ["capture.jsonl"]
+
+
 def test_list_captures_does_not_open_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _touch_capture(tmp_path, "capture.jsonl", 1_000)
 

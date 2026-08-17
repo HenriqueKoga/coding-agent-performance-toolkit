@@ -69,7 +69,7 @@ def latest_capture(directory: Path) -> Path:
     return selected
 
 
-def list_captures(directory: Path) -> tuple[CaptureListing, ...]:
+def list_captures(directory: Path, *, limit: int | None = None) -> tuple[CaptureListing, ...]:
     try:
         if not directory.exists():
             return ()
@@ -80,7 +80,10 @@ def list_captures(directory: Path) -> tuple[CaptureListing, ...]:
         raise
     except OSError as exc:
         raise CaptureListError(_directory_read_error(exc)) from exc
-    return tuple(_to_listing(candidate) for candidate in candidates)
+    listings = tuple(_to_listing(candidate) for candidate in candidates)
+    if limit is None:
+        return listings
+    return listings[:limit]
 
 
 def _select_latest_capture(directory: Path) -> Path | None:

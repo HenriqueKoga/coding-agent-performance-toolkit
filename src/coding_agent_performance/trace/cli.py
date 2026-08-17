@@ -50,10 +50,21 @@ class OutputFormat(StrEnum):
 
 
 @trace_app.command("list")
-def list_captures_command() -> None:
+def list_captures_command(
+    limit: Annotated[
+        int | None,
+        typer.Option(
+            "--limit",
+            help="Maximum number of newest captures to print. Must be a positive integer.",
+        ),
+    ] = None,
+) -> None:
     """List local captures without reading their contents."""
+    if limit is not None and limit < 1:
+        typer.echo("Limit must be a positive integer.", err=True)
+        raise typer.Exit(1) from None
     try:
-        captures = list_captures(default_captures_dir())
+        captures = list_captures(default_captures_dir(), limit=limit)
     except CaptureListError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from None

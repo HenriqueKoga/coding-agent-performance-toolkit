@@ -48,6 +48,7 @@ uv run capt --version
 uv run capt doctor
 uv run capt trace collect claude-code
 uv run capt trace list
+uv run capt trace list --limit 10
 uv run capt trace summarize path/to/capture.jsonl
 uv run capt trace summarize --latest
 ```
@@ -113,9 +114,10 @@ Metrics use `"signal":"metrics"` and the received `resourceMetrics` object as `p
 
 ```bash
 uv run capt trace list
+uv run capt trace list --limit 10
 ```
 
-Each line shows the filename, exact size in bytes, and last modification time in UTC ending in `Z`. Results are newest first. Equal timestamps use descending filename, matching `--latest`. Directories, nested files, symbolic links, and non-`.jsonl` entries are ignored. A missing or empty directory prints `No capture files found.` and exits successfully.
+Each line shows the filename, exact size in bytes, and last modification time in UTC ending in `Z`. Results are newest first. Equal timestamps use descending filename, matching `--latest`. `--limit` prints at most that many entries from the start of that order and must be a positive integer. Directories, nested files, symbolic links, and non-`.jsonl` entries are ignored. A missing or empty directory prints `No capture files found.` and exits successfully.
 
 ## Summarize a capture
 
