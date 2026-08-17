@@ -1,4 +1,6 @@
-"""Deterministic insight rules over trace summaries."""
+"""Deterministic insight rules over immutable summary evidence."""
+
+from dataclasses import dataclass
 
 from coding_agent_performance.trace.report import (
     HighToolResultVolume,
@@ -58,10 +60,20 @@ def detect_high_tool_result_volume(tools: ToolStats) -> tuple[HighToolResultVolu
     return tuple(findings)
 
 
+@dataclass(frozen=True, slots=True)
+class InsightAnalyzer:
+    """Produce deterministic insights from provider-neutral summary evidence."""
+
+    tools: ToolStats
+
+    def analyze(self) -> Insights:
+        return Insights(
+            repeated_tool_calls=detect_repeated_tool_calls(self.tools),
+            repeated_failed_tool_calls=detect_repeated_failed_tool_calls(self.tools),
+            high_tool_result_volume=detect_high_tool_result_volume(self.tools),
+        )
+
+
 def compute_insights(tools: ToolStats) -> Insights:
     """Compute all deterministic insights for a trace summary."""
-    return Insights(
-        repeated_tool_calls=detect_repeated_tool_calls(tools),
-        repeated_failed_tool_calls=detect_repeated_failed_tool_calls(tools),
-        high_tool_result_volume=detect_high_tool_result_volume(tools),
-    )
+    return InsightAnalyzer(tools=tools).analyze()
