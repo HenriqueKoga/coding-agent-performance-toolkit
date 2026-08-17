@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from coding_agent_performance.trace.report import (
+    DominantTool,
     DurationStats,
     Insights,
     ToolBreakdown,
@@ -25,7 +26,6 @@ _TOOL_NAME_MAX_WIDTH = 24
 
 def summary_to_dict(summary: TraceSummary) -> dict[str, object]:
     """Serialize a summary through an explicit field allowlist."""
-    dominant = summary.insights.dominant_tool
     return {
         "schema_version": summary.schema_version,
         "capture": {
@@ -56,12 +56,7 @@ def summary_to_dict(summary: TraceSummary) -> dict[str, object]:
                 "cache_read": summary.model_usage.tokens.cache_read,
                 "cache_creation": summary.model_usage.tokens.cache_creation,
             },
-            "duration_ms": {
-                "total": summary.model_usage.duration_ms.total,
-                "average": summary.model_usage.duration_ms.average,
-                "p50": summary.model_usage.duration_ms.p50,
-                "p95": summary.model_usage.duration_ms.p95,
-            },
+            "duration_ms": _duration_ms_dict(summary.model_usage.duration_ms),
             "by_model": [
                 {
                     "model": row.model,
@@ -90,12 +85,7 @@ def summary_to_dict(summary: TraceSummary) -> dict[str, object]:
             "success_rate_bps": summary.tools.success_rate_bps,
             "input_bytes": summary.tools.input_bytes,
             "result_bytes": summary.tools.result_bytes,
-            "duration_ms": {
-                "total": summary.tools.duration_ms.total,
-                "average": summary.tools.duration_ms.average,
-                "p50": summary.tools.duration_ms.p50,
-                "p95": summary.tools.duration_ms.p95,
-            },
+            "duration_ms": _duration_ms_dict(summary.tools.duration_ms),
             "by_name": [
                 {
                     "name": row.name,
@@ -138,51 +128,66 @@ def summary_to_dict(summary: TraceSummary) -> dict[str, object]:
             "unknown_metrics": dict(summary.coverage.unknown_metrics),
             "warnings": list(summary.coverage.warnings),
         },
-        "insights": {
-            "repeated_tool_calls": [
-                {
-                    "tool_name": finding.tool_name,
-                    "call_count": finding.call_count,
-                }
-                for finding in summary.insights.repeated_tool_calls
-            ],
-            "repeated_failed_tool_calls": [
-                {
-                    "tool_name": finding.tool_name,
-                    "failure_count": finding.failure_count,
-                }
-                for finding in summary.insights.repeated_failed_tool_calls
-            ],
-            "high_tool_result_volume": [
-                {
-                    "tool_name": finding.tool_name,
-                    "result_bytes": finding.result_bytes,
-                }
-                for finding in summary.insights.high_tool_result_volume
-            ],
-            "high_tool_failure_rate": [
-                {
-                    "tool_name": finding.tool_name,
-                    "failed_calls": finding.failed_calls,
-                    "total_calls": finding.total_calls,
-                    "failure_rate": {
-                        "numerator": finding.failure_rate.numerator,
-                        "denominator": finding.failure_rate.denominator,
-                    },
-                }
-                for finding in summary.insights.high_tool_failure_rate
-            ],
-            "dominant_tool": (
-                None
-                if dominant is None
-                else {
-                    "tool_name": dominant.tool_name,
-                    "call_count": dominant.call_count,
-                    "total_calls": dominant.total_calls,
-                    "share_percent": dominant.share_percent,
-                }
-            ),
-        },
+        "insights": _insights_dict(summary.insights),
+    }
+
+
+def _duration_ms_dict(stats: DurationStats) -> dict[str, int | float | None]:
+    return {
+        "total": stats.total,
+        "average": stats.average,
+        "p50": stats.p50,
+        "p95": stats.p95,
+    }
+
+
+def _insights_dict(insights: Insights) -> dict[str, object]:
+    return {
+        "repeated_tool_calls": [
+            {
+                "tool_name": finding.tool_name,
+                "call_count": finding.call_count,
+            }
+            for finding in insights.repeated_tool_calls
+        ],
+        "repeated_failed_tool_calls": [
+            {
+                "tool_name": finding.tool_name,
+                "failure_count": finding.failure_count,
+            }
+            for finding in insights.repeated_failed_tool_calls
+        ],
+        "high_tool_result_volume": [
+            {
+                "tool_name": finding.tool_name,
+                "result_bytes": finding.result_bytes,
+            }
+            for finding in insights.high_tool_result_volume
+        ],
+        "high_tool_failure_rate": [
+            {
+                "tool_name": finding.tool_name,
+                "failed_calls": finding.failed_calls,
+                "total_calls": finding.total_calls,
+                "failure_rate": {
+                    "numerator": finding.failure_rate.numerator,
+                    "denominator": finding.failure_rate.denominator,
+                },
+            }
+            for finding in insights.high_tool_failure_rate
+        ],
+        "dominant_tool": _dominant_tool_dict(insights.dominant_tool),
+    }
+
+
+def _dominant_tool_dict(finding: DominantTool | None) -> dict[str, str | int] | None:
+    if finding is None:
+        return None
+    return {
+        "tool_name": finding.tool_name,
+        "call_count": finding.call_count,
+        "total_calls": finding.total_calls,
+        "share_percent": finding.share_percent,
     }
 
 
@@ -294,38 +299,54 @@ def _seconds(value: int | float) -> str:
 
 def _insight_lines(insights: Insights) -> list[str]:
     lines: list[str] = []
-    if insights.repeated_tool_calls:
-        lines.append("Repeated tool calls")
-        lines.extend(f"- {finding.tool_name}: {finding.call_count} calls" for finding in insights.repeated_tool_calls)
-    if insights.repeated_failed_tool_calls:
-        lines.append("Repeated failed tool calls")
-        lines.extend(
+    _append_insight_group(
+        lines,
+        "Repeated tool calls",
+        tuple(f"- {finding.tool_name}: {finding.call_count} calls" for finding in insights.repeated_tool_calls),
+    )
+    _append_insight_group(
+        lines,
+        "Repeated failed tool calls",
+        tuple(
             f"- {finding.tool_name}: {finding.failure_count} failures"
             for finding in insights.repeated_failed_tool_calls
-        )
-    if insights.high_tool_result_volume:
-        lines.append("High tool result volume")
-        lines.extend(
+        ),
+    )
+    _append_insight_group(
+        lines,
+        "High tool result volume",
+        tuple(
             f"- {finding.tool_name}: {finding.result_bytes} result bytes"
             for finding in insights.high_tool_result_volume
-        )
-    if insights.high_tool_failure_rate:
-        lines.append("High tool failure rate")
-        lines.extend(
+        ),
+    )
+    _append_insight_group(
+        lines,
+        "High tool failure rate",
+        tuple(
             (
                 f"- {finding.tool_name}: {finding.failed_calls} failed of "
                 f"{finding.total_calls} calls "
                 f"({finding.failure_rate.numerator}/{finding.failure_rate.denominator})"
             )
             for finding in insights.high_tool_failure_rate
-        )
+        ),
+    )
     if insights.dominant_tool is not None:
         finding = insights.dominant_tool
-        lines.append("Dominant tool")
-        lines.append(
-            f"- {finding.tool_name}: {finding.call_count}/{finding.total_calls} calls ({finding.share_percent}%)"
+        _append_insight_group(
+            lines,
+            "Dominant tool",
+            (f"- {finding.tool_name}: {finding.call_count}/{finding.total_calls} calls ({finding.share_percent}%)",),
         )
     return lines
+
+
+def _append_insight_group(lines: list[str], heading: str, entries: tuple[str, ...]) -> None:
+    if not entries:
+        return
+    lines.append(heading)
+    lines.extend(entries)
 
 
 def _tool_table(rows: tuple[ToolBreakdown, ...]) -> str:
