@@ -68,7 +68,7 @@ After the telemetry-summary work, CAPT can:
 - Validate those envelopes in streaming mode
 - Decode OTLP HTTP/JSON
 - Normalize Claude Code telemetry through an allowlist
-- Print deterministic text and JSON summaries
+- Print deterministic text and JSON summaries, including capture-level tool execution counts and success rate
 - Detect repeated tool calls, repeated failed tool calls, high cumulative tool result volume, and high tool failure rate from those summaries
 - List eligible local capture files without reading their contents
 

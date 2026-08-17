@@ -32,7 +32,7 @@ In scope today:
 - Streaming validation of those envelopes
 - OTLP HTTP/JSON decoding
 - Claude Code allowlist normalization
-- Incremental, deterministic text and JSON summaries
+- Incremental, deterministic text and JSON summaries, including capture-level tool execution counts and an integer basis-point success rate
 - Deterministic insight rules for repeated tool calls, repeated failed tool calls, high cumulative tool result volume, and high tool failure rate
 
 Out of scope today:
@@ -134,7 +134,7 @@ Cost prefers `cost_usd_micros`. If that field is absent, `cost_usd` is converted
 
 ## Provider-neutral records
 
-Domain records live in `trace/records.py`. They carry only the fields required for aggregation. After normalization, the full OTLP attribute map is gone. The finished report lives in `trace/report.py` and does not contain mutable maps.
+Domain records live in `trace/records.py`. They carry only the fields required for aggregation. After normalization, the full OTLP attribute map is gone. The finished report lives in `trace/report.py` and does not contain mutable maps. Capture-level tool success rate is integer basis points derived from `successes` and `calls`; it is `null` when there are no tool calls.
 
 ## Incremental summarizer
 

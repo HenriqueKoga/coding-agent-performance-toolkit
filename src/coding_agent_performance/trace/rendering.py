@@ -86,6 +86,7 @@ def summary_to_dict(summary: TraceSummary) -> dict[str, object]:
             "calls": summary.tools.calls,
             "successes": summary.tools.successes,
             "failures": summary.tools.failures,
+            "success_rate_bps": summary.tools.success_rate_bps,
             "input_bytes": summary.tools.input_bytes,
             "result_bytes": summary.tools.result_bytes,
             "duration_ms": {
@@ -205,7 +206,9 @@ def render_text(summary: TraceSummary) -> str:
         "",
         "Tools",
         f"  Calls:           {tools.calls}",
-        f"  Success rate:    {_percent(tools.successes, tools.calls)}",
+        f"  Successes:       {tools.successes}",
+        f"  Failures:        {tools.failures}",
+        f"  Success rate:    {_bps_percent(tools.success_rate_bps)}",
         f"  Duration:        {_duration_short(tools.duration_ms)}",
     ]
     if tools.by_name:
@@ -249,6 +252,12 @@ def _percent(successes: int, calls: int) -> str:
     if calls == 0:
         return "n/a"
     return f"{(successes / calls) * 100:.1f}%"
+
+
+def _bps_percent(bps: int | None) -> str:
+    if bps is None:
+        return "n/a"
+    return f"{bps // 100}.{bps % 100:02d}%"
 
 
 def _duration_line(stats: DurationStats) -> str:

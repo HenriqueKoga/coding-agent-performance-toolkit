@@ -5,7 +5,7 @@ from pathlib import Path
 from coding_agent_performance.trace.aggregation import IncrementalSummarizer
 from coding_agent_performance.trace.capture import CaptureEnvelope
 from coding_agent_performance.trace.insights import HIGH_TOOL_RESULT_VOLUME_THRESHOLD
-from coding_agent_performance.trace.records import ToolExecution
+from coding_agent_performance.trace.records import ActivityMeasurement, ToolExecution
 from coding_agent_performance.trace.rendering import (
     escape_filename,
     format_utc_timestamp,
@@ -100,6 +100,30 @@ def test_json_allowlist_keeps_v1_activity_keys() -> None:
     assert set(activity["active_time_seconds"]) == {"user", "cli"}
     assert set(activity["lines_of_code"]) == {"added", "removed"}
     assert set(activity["code_edit_decisions"]) == {"accepted", "rejected"}
+
+
+def test_json_allowlist_keeps_tool_health_keys() -> None:
+    summary = summarize_capture(FIXTURE_PATH)
+    payload = summary_to_dict(summary)
+    tools = payload["tools"]
+    assert isinstance(tools, dict)
+    assert set(tools) == {
+        "calls",
+        "successes",
+        "failures",
+        "success_rate_bps",
+        "input_bytes",
+        "result_bytes",
+        "duration_ms",
+        "by_name",
+    }
+    assert tools["calls"] == 3
+    assert tools["successes"] == 2
+    assert tools["failures"] == 1
+    assert tools["success_rate_bps"] == 6666
+    bash = next(row for row in tools["by_name"] if row["name"] == "Bash")
+    assert bash["success_rate"] == 0.5
+    assert "success_rate_bps" not in bash
 
 
 def test_json_allowlist_keeps_insight_keys() -> None:
@@ -712,6 +736,129 @@ def test_high_tool_result_volume_contains_only_safe_evidence() -> None:
     for finding in parsed["insights"]["high_tool_result_volume"]:
         assert set(finding.keys()) == {"tool_name", "result_bytes"}
         assert isinstance(finding["result_bytes"], int)
+
+
+def _activity_only_summary(filename: str) -> IncrementalSummarizer:
+    summarizer = IncrementalSummarizer(filename=filename)
+    measurement = ActivityMeasurement(
+        name="claude_code.commit.count",
+        value=1,
+        unit="",
+        attributes=(),
+        start_time_unix_nano=1,
+        time_unix_nano=2,
+        aggregation_temporality="delta",
+        kind="sum",
+    )
+    summarizer.add(
+        _envelope("metrics", resource_metrics([])),
+        (measurement,),
+        log_count=0,
+        metric_count=1,
+        unsupported=0,
+    )
+    return summarizer
+
+
+def test_zero_tool_calls_render_explicit_safe_rate() -> None:
+    summary = _activity_only_summary("zero-tools.jsonl").finish(Path("zero-tools.jsonl"))
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert parsed["tools"]["calls"] == 0
+    assert parsed["tools"]["successes"] == 0
+    assert parsed["tools"]["failures"] == 0
+    assert parsed["tools"]["success_rate_bps"] is None
+    assert "Successes:       0" in text
+    assert "Failures:        0" in text
+    assert "Success rate:    n/a" in text
+    assert "NaN" not in text
+    assert "Infinity" not in render_json(summary)
+    assert parsed["insights"] == {
+        "repeated_tool_calls": [],
+        "repeated_failed_tool_calls": [],
+        "high_tool_result_volume": [],
+        "high_tool_failure_rate": [],
+    }
+
+
+def test_all_successful_calls_render_full_rate() -> None:
+    summarizer = IncrementalSummarizer(filename="all-success.jsonl")
+    _add_tools(summarizer, *(_tool_execution("Read", success=True, event_sequence=i) for i in range(3)))
+    summary = summarizer.finish(Path("all-success.jsonl"))
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert parsed["tools"]["calls"] == 3
+    assert parsed["tools"]["successes"] == 3
+    assert parsed["tools"]["failures"] == 0
+    assert parsed["tools"]["success_rate_bps"] == 10_000
+    assert "Successes:       3" in text
+    assert "Failures:        0" in text
+    assert "Success rate:    100.00%" in text
+    assert parsed["insights"]["repeated_tool_calls"] == [{"tool_name": "Read", "call_count": 3}]
+    assert parsed["insights"]["repeated_failed_tool_calls"] == []
+
+
+def test_all_failed_calls_render_zero_rate() -> None:
+    summarizer = IncrementalSummarizer(filename="all-failed.jsonl")
+    _add_tools(summarizer, *(_tool_execution("Bash", success=False, event_sequence=i) for i in range(2)))
+    summary = summarizer.finish(Path("all-failed.jsonl"))
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert parsed["tools"]["calls"] == 2
+    assert parsed["tools"]["successes"] == 0
+    assert parsed["tools"]["failures"] == 2
+    assert parsed["tools"]["success_rate_bps"] == 0
+    assert "Successes:       0" in text
+    assert "Failures:        2" in text
+    assert "Success rate:    0.00%" in text
+    assert parsed["insights"]["repeated_failed_tool_calls"] == []
+
+
+def test_mixed_calls_render_exact_counts_and_stable_rate() -> None:
+    summarizer = IncrementalSummarizer(filename="mixed-health.jsonl")
+    records = [
+        _tool_execution("Read", success=True, event_sequence=0),
+        _tool_execution("Read", success=True, event_sequence=1),
+        _tool_execution("Bash", success=False, event_sequence=2),
+    ]
+    _add_tools(summarizer, *records)
+    summary = summarizer.finish(Path("mixed-health.jsonl"))
+    text = render_text(summary)
+    payload = render_json(summary)
+    parsed = json.loads(payload)
+    assert parsed["tools"]["calls"] == 3
+    assert parsed["tools"]["successes"] == 2
+    assert parsed["tools"]["failures"] == 1
+    assert parsed["tools"]["success_rate_bps"] == 6666
+    assert "Successes:       2" in text
+    assert "Failures:        1" in text
+    assert "Success rate:    66.66%" in text
+    assert render_text(summary) == text
+    assert render_json(summary) == payload
+    bash = next(row for row in parsed["tools"]["by_name"] if row["name"] == "Bash")
+    read = next(row for row in parsed["tools"]["by_name"] if row["name"] == "Read")
+    assert bash["success_rate"] == 0.0
+    assert read["success_rate"] == 1.0
+    assert parsed["insights"] == {
+        "repeated_tool_calls": [],
+        "repeated_failed_tool_calls": [],
+        "high_tool_result_volume": [],
+        "high_tool_failure_rate": [],
+    }
+
+
+def test_tool_health_text_and_json_agree_on_fixture() -> None:
+    summary = summarize_capture(FIXTURE_PATH)
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert parsed["tools"]["success_rate_bps"] == 6666
+    assert "Success rate:    66.66%" in text
+    assert parsed["tools"]["calls"] == summary.tools.calls
+    assert parsed["tools"]["successes"] == summary.tools.successes
+    assert parsed["tools"]["failures"] == summary.tools.failures
+    assert "quality" not in text.lower()
+    assert "health score" not in text.lower()
+    assert "grade" not in text.lower()
 
 
 def test_high_tool_failure_rate_appears_in_text() -> None:
