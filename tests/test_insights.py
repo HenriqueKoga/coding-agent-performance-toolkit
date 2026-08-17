@@ -4,6 +4,7 @@ from coding_agent_performance.trace.insights import (
     DOMINANT_TOOL_MIN_TOTAL_CALLS,
     DOMINANT_TOOL_SHARE_THRESHOLD_PERCENT,
     HIGH_TOOL_RESULT_VOLUME_THRESHOLD,
+    InsightAnalyzer,
     compute_insights,
     detect_dominant_tool,
     detect_high_tool_failure_rate,
@@ -143,7 +144,9 @@ def test_detect_repeated_tool_calls_deterministic_ordering() -> None:
 
 
 def test_compute_insights() -> None:
-    insights = compute_insights(_tools(_tool("Read", calls=8)))
+    tools = _tools(_tool("Read", calls=8))
+    insights = compute_insights(tools)
+    assert insights == InsightAnalyzer(tools=tools).analyze()
     assert isinstance(insights, Insights)
     assert insights.repeated_tool_calls == (RepeatedToolCall(tool_name="Read", call_count=8),)
     assert insights.repeated_failed_tool_calls == ()

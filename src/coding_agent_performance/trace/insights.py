@@ -1,6 +1,7 @@
-"""Deterministic insight rules over trace summaries."""
+"""Deterministic insight rules over immutable summary evidence."""
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 from coding_agent_performance.trace.report import (
     DominantTool,
@@ -108,15 +109,25 @@ def detect_dominant_tool(tools: ToolStats) -> DominantTool | None:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class InsightAnalyzer:
+    """Produce deterministic insights from provider-neutral summary evidence."""
+
+    tools: ToolStats
+
+    def analyze(self) -> Insights:
+        return Insights(
+            repeated_tool_calls=detect_repeated_tool_calls(self.tools),
+            repeated_failed_tool_calls=detect_repeated_failed_tool_calls(self.tools),
+            high_tool_result_volume=detect_high_tool_result_volume(self.tools),
+            high_tool_failure_rate=detect_high_tool_failure_rate(self.tools),
+            dominant_tool=detect_dominant_tool(self.tools),
+        )
+
+
 def compute_insights(tools: ToolStats) -> Insights:
     """Compute all deterministic insights for a trace summary."""
-    return Insights(
-        repeated_tool_calls=detect_repeated_tool_calls(tools),
-        repeated_failed_tool_calls=detect_repeated_failed_tool_calls(tools),
-        high_tool_result_volume=detect_high_tool_result_volume(tools),
-        high_tool_failure_rate=detect_high_tool_failure_rate(tools),
-        dominant_tool=detect_dominant_tool(tools),
-    )
+    return InsightAnalyzer(tools=tools).analyze()
 
 
 def _breakdowns_by_name(tools: ToolStats) -> Iterable[ToolBreakdown]:

@@ -1,7 +1,8 @@
 from datetime import datetime
 from pathlib import Path
 
-from coding_agent_performance.trace.aggregation import IncrementalSummarizer, duration_stats, nearest_rank
+from coding_agent_performance.trace.accumulators import duration_stats, nearest_rank
+from coding_agent_performance.trace.aggregation import IncrementalSummarizer
 from coding_agent_performance.trace.capture import CaptureEnvelope
 from coding_agent_performance.trace.records import (
     ActivityMeasurement,

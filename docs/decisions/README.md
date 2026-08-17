@@ -23,6 +23,7 @@ See [architecture.md](../architecture.md) for the current system structure.
 | [0002](0002-official-telemetry-sources.md) | Official telemetry sources | Accepted |
 | [0003](0003-versioned-jsonl-captures.md) | Versioned JSONL captures | Accepted |
 | [0004](0004-vendor-adapters-at-the-edge.md) | Vendor adapters at the edge | Accepted |
+| [0005](0005-trace-aggregation-boundaries.md) | Trace aggregation boundaries | Accepted |
 
 ## When to create an ADR
 
