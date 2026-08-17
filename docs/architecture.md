@@ -33,10 +33,12 @@ In scope today:
 - OTLP HTTP/JSON decoding
 - Claude Code allowlist normalization
 - Incremental, deterministic text and JSON summaries
+- Deterministic insight rules for repeated tool calls
 
 Out of scope today:
 
-- Insight rules, recommendations, scores, and capture comparison
+- Additional insight rules (loops, failures, oversized outputs, compactions, subagent analysis)
+- Recommendations, scores, and capture comparison
 - Reading Claude Code transcripts under `~/.claude/projects`
 - Databases, remote HTTP APIs, public network binds, TLS, gRPC, and protobuf
 - MCP, embeddings, semantic search, and Context Ledger
@@ -58,6 +60,7 @@ Claude Code
     -> OTLP decoder
     -> Claude Code normalizer
     -> incremental summarizer
+    -> insight computation
     -> text or JSON renderer
 ```
 
@@ -79,6 +82,7 @@ src/coding_agent_performance/
     trace/report.py                     Immutable summary DTOs
     trace/cost.py                       Safe USD to microdollar conversion
     trace/aggregation.py                Incremental summarizer and statistics
+    trace/insights.py                   Deterministic insight rules
     trace/summary.py                    Capture-to-summary use case
     trace/rendering.py                  Allowlist JSON dict plus text/JSON summary and capture-list output
 ```
@@ -161,11 +165,11 @@ Likely shape, kept high-level on purpose:
 
 1. **Ingestion.** Isolated adapters configure or read vendor-specific sources and emit raw captures. The Claude Code path is OTLP HTTP/JSON; other agents may differ.
 2. **Normalization.** A provider-independent layer turns raw envelopes into shared records. That layer does not live inside the HTTP receiver.
-3. **Domain.** Deterministic insight rules operate on summaries and normalized records: redundant calls, loops, oversized outputs, and later a Context Ledger.
+3. **Domain.** Deterministic insight rules operate on summaries and normalized records. The first rule (repeated tool calls) is now implemented. Future rules may detect loops, redundant calls, failures, oversized outputs, and later support a Context Ledger.
 4. **Search.** Code search optimized for LLM consumption, still local.
 5. **Output.** Concise structured reports for humans and agents.
 
-The next step after this summary is deterministic insight rules. Vendor adapters must remain at the edge. The collector, storage format, OTLP decoder, and domain types should not import Claude Code-specific event names except through the adapter.
+Insight rules remain small, deterministic, and explainable. Vendor adapters must remain at the edge. The collector, storage format, OTLP decoder, and domain types should not import Claude Code-specific event names except through the adapter.
 
 Packages are created only when they have a real implementation. There is no generic provider registry in this version.
 
