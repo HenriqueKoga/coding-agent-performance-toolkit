@@ -149,9 +149,7 @@ def test_list_escapes_unsafe_filenames(monkeypatch: pytest.MonkeyPatch, tmp_path
     assert str(tmp_path) not in result.output
 
 
-def test_list_does_not_read_or_parse_capture_contents(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_list_does_not_read_or_parse_capture_contents(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     payload = b'{"secret":"payload-must-not-leak"}\n'
     _touch_capture(tmp_path, "capture.jsonl", 1_000, payload)
     monkeypatch.setattr("coding_agent_performance.trace.cli.default_captures_dir", lambda: tmp_path)
