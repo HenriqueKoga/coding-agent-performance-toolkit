@@ -69,6 +69,7 @@ After the telemetry-summary work, CAPT can:
 - Decode OTLP HTTP/JSON
 - Normalize Claude Code telemetry through an allowlist
 - Print deterministic text and JSON summaries
+- List eligible local capture files without reading their contents
 
 This version does not score sessions, emit recommendations, compare captures, or call a model.
 

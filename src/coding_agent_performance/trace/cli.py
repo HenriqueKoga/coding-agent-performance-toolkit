@@ -16,20 +16,22 @@ from coding_agent_performance.trace.collector import (
     CollectorStats,
     OtlpHttpCollector,
 )
-from coding_agent_performance.trace.rendering import render_json, render_text
+from coding_agent_performance.trace.rendering import render_capture_list, render_json, render_text
 from coding_agent_performance.trace.storage import (
+    CaptureListError,
     CaptureStorageError,
     CaptureWriter,
     LatestCaptureError,
     default_captures_dir,
     latest_capture,
+    list_captures,
     new_capture_path,
 )
 from coding_agent_performance.trace.summary import summarize_capture
 
 trace_app = typer.Typer(
     name="trace",
-    help="Collect and summarize coding-agent telemetry.",
+    help="Collect, list, and summarize coding-agent telemetry.",
     no_args_is_help=True,
     add_completion=False,
 )
@@ -45,6 +47,17 @@ trace_app.add_typer(collect_app, name="collect")
 class OutputFormat(StrEnum):
     TEXT = "text"
     JSON = "json"
+
+
+@trace_app.command("list")
+def list_captures_command() -> None:
+    """List local captures without reading their contents."""
+    try:
+        captures = list_captures(default_captures_dir())
+    except CaptureListError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from None
+    typer.echo(render_capture_list(captures))
 
 
 @trace_app.command("summarize")

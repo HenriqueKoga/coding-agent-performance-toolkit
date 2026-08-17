@@ -9,11 +9,13 @@ import pytest
 
 from coding_agent_performance.trace.storage import (
     SCHEMA_VERSION,
+    CaptureListError,
     CaptureStorageError,
     CaptureWriter,
     LatestCaptureError,
     default_captures_dir,
     latest_capture,
+    list_captures,
     make_envelope,
     new_capture_path,
 )
@@ -222,6 +224,18 @@ def test_latest_capture_tie_breaks_by_filename(tmp_path: Path) -> None:
     assert latest_capture(tmp_path) == winner
 
 
+def test_latest_capture_does_not_materialize_all_captures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _touch_capture(tmp_path, "older.jsonl", 1_000)
+    newer = _touch_capture(tmp_path, "newer.jsonl", 2_000)
+
+    def boom(_directory: Path) -> list[object]:
+        raise AssertionError("latest_capture must not sort the full capture list")
+
+    monkeypatch.setattr("coding_agent_performance.trace.storage._scan_eligible_captures", boom)
+
+    assert latest_capture(tmp_path) == newer
+
+
 def test_latest_capture_missing_directory(tmp_path: Path) -> None:
     missing = tmp_path / "captures"
     with pytest.raises(LatestCaptureError, match="does not exist") as exc_info:
@@ -267,3 +281,112 @@ def test_latest_capture_excludes_symlinks(tmp_path: Path) -> None:
     os.utime(link, ns=(2_000, 2_000), follow_symlinks=False)
 
     assert latest_capture(tmp_path) == real
+
+
+def test_list_captures_orders_newest_first(tmp_path: Path) -> None:
+    older = _touch_capture(tmp_path, "older.jsonl", 1_000)
+    older.write_bytes(b"aa")
+    os.utime(older, ns=(1_000, 1_000))
+    newer = _touch_capture(tmp_path, "newer.jsonl", 2_000)
+    newer.write_bytes(b"bbbb")
+    os.utime(newer, ns=(2_000, 2_000))
+    _touch_capture(tmp_path, "notes.txt", 3_000)
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    _touch_capture(nested, "hidden.jsonl", 4_000)
+    (tmp_path / "dir.jsonl").mkdir()
+
+    listed = list_captures(tmp_path)
+
+    assert [item.name for item in listed] == ["newer.jsonl", "older.jsonl"]
+    assert listed[0].size_bytes == 4
+    assert listed[1].size_bytes == 2
+    assert latest_capture(tmp_path) == tmp_path / listed[0].name
+
+
+def test_list_captures_tie_breaks_by_filename(tmp_path: Path) -> None:
+    _touch_capture(tmp_path, "alpha.jsonl", 5_000)
+    _touch_capture(tmp_path, "zeta.jsonl", 5_000)
+
+    listed = list_captures(tmp_path)
+
+    assert [item.name for item in listed] == ["zeta.jsonl", "alpha.jsonl"]
+    assert latest_capture(tmp_path) == tmp_path / listed[0].name
+
+
+def test_list_captures_normalizes_mtime_to_utc(tmp_path: Path) -> None:
+    modified = datetime(2026, 8, 17, 16, 25, 9, tzinfo=UTC)
+    mtime_ns = int(modified.timestamp()) * 1_000_000_000 + 123_456_789
+    path = _touch_capture(tmp_path, "capture.jsonl", mtime_ns)
+    stat_result = path.stat()
+    seconds, nanos = divmod(stat_result.st_mtime_ns, 1_000_000_000)
+    expected = datetime.fromtimestamp(seconds, tz=UTC).replace(microsecond=nanos // 1_000)
+
+    listed = list_captures(tmp_path)
+
+    assert len(listed) == 1
+    assert listed[0].modified_at.tzinfo is not None
+    assert listed[0].modified_at.utcoffset() == UTC.utcoffset(listed[0].modified_at)
+    assert listed[0].modified_at == expected
+    assert listed[0].modified_at.replace(microsecond=0) == modified
+
+
+def test_list_captures_missing_directory(tmp_path: Path) -> None:
+    missing = tmp_path / "captures"
+    assert list_captures(missing) == ()
+
+
+def test_list_captures_empty_directory(tmp_path: Path) -> None:
+    assert list_captures(tmp_path) == ()
+
+
+def test_list_captures_rejects_non_directory(tmp_path: Path) -> None:
+    path = tmp_path / "not-a-dir"
+    path.write_text("payload-should-not-leak\n", encoding="utf-8")
+    with pytest.raises(CaptureListError, match="not a directory") as exc_info:
+        list_captures(path)
+    assert "payload-should-not-leak" not in str(exc_info.value)
+    assert str(path) not in str(exc_info.value)
+
+
+def test_list_captures_oserror(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_scandir(_path: Path) -> object:
+        raise OSError("permission denied")
+
+    monkeypatch.setattr("coding_agent_performance.trace.storage.os.scandir", fail_scandir)
+    with pytest.raises(CaptureListError, match="Could not read default capture directory") as exc_info:
+        list_captures(tmp_path)
+    assert "permission denied" in str(exc_info.value)
+    assert str(tmp_path) not in str(exc_info.value)
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlink support required")
+def test_list_captures_excludes_symlinks(tmp_path: Path) -> None:
+    real = _touch_capture(tmp_path, "real.jsonl", 1_000)
+    link = tmp_path / "newer-link.jsonl"
+    try:
+        link.symlink_to(real)
+    except OSError:
+        pytest.skip("symbolic links are not supported")
+    os.utime(link, ns=(2_000, 2_000), follow_symlinks=False)
+
+    listed = list_captures(tmp_path)
+
+    assert [item.name for item in listed] == ["real.jsonl"]
+    assert latest_capture(tmp_path) == real
+
+
+def test_list_captures_does_not_open_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _touch_capture(tmp_path, "capture.jsonl", 1_000)
+
+    def fail_open(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("capture files must not be opened")
+
+    monkeypatch.setattr("builtins.open", fail_open)
+    monkeypatch.setattr(Path, "open", fail_open)
+    monkeypatch.setattr(Path, "read_bytes", fail_open)
+    monkeypatch.setattr(Path, "read_text", fail_open)
+
+    listed = list_captures(tmp_path)
+
+    assert [item.name for item in listed] == ["capture.jsonl"]

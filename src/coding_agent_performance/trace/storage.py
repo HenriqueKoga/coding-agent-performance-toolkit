@@ -3,6 +3,8 @@
 import os
 import secrets
 import threading
+from collections.abc import Iterator
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, TextIO
@@ -24,6 +26,24 @@ class LatestCaptureError(Exception):
     """Expected failure while selecting the newest local capture."""
 
 
+class CaptureListError(Exception):
+    """Expected failure while listing local captures."""
+
+
+@dataclass(frozen=True, slots=True)
+class CaptureListing:
+    name: str
+    size_bytes: int
+    modified_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class _CaptureCandidate:
+    name: str
+    size_bytes: int
+    mtime_ns: int
+
+
 def default_captures_dir() -> Path:
     return user_state_path("capt", appauthor=False) / "captures"
 
@@ -43,30 +63,79 @@ def latest_capture(directory: Path) -> Path:
     except LatestCaptureError:
         raise
     except OSError as exc:
-        detail = exc.strerror or str(exc) or "read error"
-        raise LatestCaptureError(f"Could not read default capture directory: {detail}") from exc
+        raise LatestCaptureError(_directory_read_error(exc)) from exc
     if selected is None:
         raise LatestCaptureError("No capture files found in the default capture directory.")
     return selected
 
 
+def list_captures(directory: Path) -> tuple[CaptureListing, ...]:
+    try:
+        if not directory.exists():
+            return ()
+        if not directory.is_dir():
+            raise CaptureListError("Default capture path is not a directory.")
+        candidates = _scan_eligible_captures(directory)
+    except CaptureListError:
+        raise
+    except OSError as exc:
+        raise CaptureListError(_directory_read_error(exc)) from exc
+    return tuple(_to_listing(candidate) for candidate in candidates)
+
+
 def _select_latest_capture(directory: Path) -> Path | None:
-    best: tuple[int, str] | None = None
-    selected: Path | None = None
+    selected: _CaptureCandidate | None = None
+    for candidate in _iter_eligible_captures(directory):
+        if selected is None or _capture_order_key(candidate) > _capture_order_key(selected):
+            selected = candidate
+    if selected is None:
+        return None
+    return directory / selected.name
+
+
+def _scan_eligible_captures(directory: Path) -> list[_CaptureCandidate]:
+    candidates = list(_iter_eligible_captures(directory))
+    candidates.sort(key=_capture_order_key, reverse=True)
+    return candidates
+
+
+def _iter_eligible_captures(directory: Path) -> Iterator[_CaptureCandidate]:
     with os.scandir(directory) as entries:
         for entry in entries:
             if not _is_eligible_capture(entry):
                 continue
             stat_result = entry.stat(follow_symlinks=False)
-            key = (stat_result.st_mtime_ns, entry.name)
-            if best is None or key > best:
-                best = key
-                selected = directory / entry.name
-    return selected
+            yield _CaptureCandidate(
+                name=entry.name,
+                size_bytes=stat_result.st_size,
+                mtime_ns=stat_result.st_mtime_ns,
+            )
+
+
+def _capture_order_key(candidate: _CaptureCandidate) -> tuple[int, str]:
+    return (candidate.mtime_ns, candidate.name)
 
 
 def _is_eligible_capture(entry: os.DirEntry[str]) -> bool:
     return entry.name.endswith(".jsonl") and not entry.is_symlink() and entry.is_file(follow_symlinks=False)
+
+
+def _to_listing(candidate: _CaptureCandidate) -> CaptureListing:
+    return CaptureListing(
+        name=candidate.name,
+        size_bytes=candidate.size_bytes,
+        modified_at=_utc_datetime_from_mtime_ns(candidate.mtime_ns),
+    )
+
+
+def _utc_datetime_from_mtime_ns(mtime_ns: int) -> datetime:
+    seconds, nanos = divmod(mtime_ns, 1_000_000_000)
+    return datetime.fromtimestamp(seconds, tz=UTC).replace(microsecond=nanos // 1_000)
+
+
+def _directory_read_error(exc: OSError) -> str:
+    detail = exc.strerror or str(exc) or "read error"
+    return f"Could not read default capture directory: {detail}"
 
 
 def make_envelope(*, source: str, signal: str, payload: dict[str, object]) -> CaptureEnvelope:

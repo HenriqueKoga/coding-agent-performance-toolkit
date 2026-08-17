@@ -47,6 +47,7 @@ uv run capt --help
 uv run capt --version
 uv run capt doctor
 uv run capt trace collect claude-code
+uv run capt trace list
 uv run capt trace summarize path/to/capture.jsonl
 uv run capt trace summarize --latest
 ```
@@ -94,7 +95,7 @@ Without `--output`, captures are written under the user state directory from `pl
 ~/.local/state/capt/captures/
 ```
 
-Filenames look like `claude-code-20260814T220000Z-a1b2c3.jsonl`. Directories and files use restricted POSIX permissions where the OS supports them (`0700` / `0600`).
+Filenames look like `claude-code-20260814T220000Z-a1b2c3.jsonl`. Directories and files use restricted POSIX permissions where the OS supports them (`0700` / `0600`). Use `capt trace list` to inspect eligible captures in that directory without opening them.
 
 ### Capture format
 
@@ -105,6 +106,16 @@ Each accepted POST becomes one compact JSON line. CAPT does not split or interpr
 ```
 
 Metrics use `"signal":"metrics"` and the received `resourceMetrics` object as `payload`.
+
+## List local captures
+
+`capt trace list` prints eligible capture files from the default capture directory without opening or parsing them.
+
+```bash
+uv run capt trace list
+```
+
+Each line shows the filename, exact size in bytes, and last modification time in UTC ending in `Z`. Results are newest first. Equal timestamps use descending filename, matching `--latest`. Directories, nested files, symbolic links, and non-`.jsonl` entries are ignored. A missing or empty directory prints `No capture files found.` and exits successfully.
 
 ## Summarize a capture
 
@@ -125,7 +136,7 @@ uv run capt trace summarize \
   --format json
 ```
 
-`--latest` summarizes the newest eligible `.jsonl` file in the default capture directory. Provide either `--latest` or an explicit path, not both. `--format text` is the default. `--format json` writes only JSON to stdout. See [docs/summary-format.md](docs/summary-format.md) for the pre-alpha JSON contract.
+`--latest` summarizes the newest eligible `.jsonl` file in the default capture directory. Provide either `--latest` or an explicit path, not both. `--format text` is the default. `--format json` writes only JSON to stdout. See [docs/summary-format.md](docs/summary-format.md) for the pre-alpha JSON contract. Use `capt trace list` to inspect available captures before summarizing.
 
 ## Troubleshooting
 
@@ -144,6 +155,7 @@ uv run ruff check .
 uv run ruff format --check .
 uv run ty check
 uv run capt trace collect claude-code --help
+uv run capt trace list --help
 uv run capt trace summarize --help
 ```
 
