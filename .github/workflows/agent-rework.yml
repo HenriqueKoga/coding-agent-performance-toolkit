@@ -1,0 +1,43 @@
+name: Agent rework
+
+on:
+  pull_request_review:
+    types:
+      - submitted
+
+concurrency:
+  group: agent-rework-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  rework:
+    name: Dispatch Codex rework agent
+    if: github.event.review.user.login == 'chatgpt-codex-connector[bot]' && github.event.sender.login == 'chatgpt-codex-connector[bot]' && github.event.sender.type == 'Bot'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: write
+    steps:
+      - name: Check out trusted rework scripts
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Dispatch at most one Codex rework agent
+        shell: bash
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          python .github/scripts/agent_rework.py dispatch --event-file "${GITHUB_EVENT_PATH}"
