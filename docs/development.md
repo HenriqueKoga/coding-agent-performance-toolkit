@@ -96,9 +96,8 @@ A pull request whose body contains exactly one `Closes #<issue>` line, matching 
 
 - moves the linked Issue from `agent:ready` to `agent:working` when the PR is opened, and copies that Issue's single `risk:*` label to the PR
 - moves the linked Issue from `agent:working` to `needs:human-review` when the PR is marked ready for review
-- if the Issue has no lifecycle label when that PR is marked ready for review, adds `needs:human-review` without inventing `agent:ready`
 
-Unexpected lifecycle states produce a diagnostic and leave labels unchanged; they do not fail the workflow job. Invalid risk classification, conflicting labels, and ambiguous `Closes #<issue>` links still fail. `synchronize` re-applies the same rules so a later push can retry bookkeeping.
+Unexpected lifecycle states, including a missing lifecycle label, produce a diagnostic and leave labels unchanged. Invalid risk classification, conflicting labels, and ambiguous `Closes #<issue>` links still fail.
 
 `agent:ready` is never applied automatically. Risk classification is never inferred. Merged PRs close Issues through GitHub's normal `Closes #N` behavior.
 

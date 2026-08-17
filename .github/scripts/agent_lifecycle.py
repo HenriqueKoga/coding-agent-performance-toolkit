@@ -98,18 +98,11 @@ def load_pull_request_event(path: Path) -> PullRequestEvent:
         body = body_value
     else:
         raise LifecycleError("pull request body is not a string")
-    draft = pull_request.get("draft") is True
-    return PullRequestEvent(action=_planning_action(payload.get("action"), draft), body=body)
-
-
-def _planning_action(event_action: object, draft: bool) -> PullRequestAction:
-    match event_action:
+    match payload.get("action"):
         case "opened":
-            return "opened"
+            return PullRequestEvent(action="opened", body=body)
         case "ready_for_review":
-            return "ready_for_review"
-        case "synchronize":
-            return "opened" if draft else "ready_for_review"
+            return PullRequestEvent(action="ready_for_review", body=body)
         case _:
             raise LifecycleError("GitHub event action is not a supported pull_request lifecycle event")
 
@@ -127,7 +120,7 @@ def plan_lifecycle(
         case "opened":
             return _plan_opened(issue_number, lifecycle, risk, pr_labels)
         case "ready_for_review":
-            return _plan_ready_for_review(issue_number, lifecycle, risk, pr_labels)
+            return _plan_ready_for_review(issue_number, lifecycle, risk)
 
 
 def _plan_opened(
@@ -168,7 +161,6 @@ def _plan_ready_for_review(
     issue_number: int,
     lifecycle: LifecycleLabel | None,
     risk: RiskLabel,
-    pr_labels: Sequence[str],
 ) -> LifecyclePlan:
     if lifecycle == AGENT_WORKING:
         return LifecyclePlan(
@@ -185,18 +177,6 @@ def _plan_ready_for_review(
             issue_remove=(),
             pr_add=(),
             message=f"Issue #{issue_number} already {NEEDS_HUMAN_REVIEW}; {risk} unchanged",
-        )
-    if lifecycle is None:
-        pr_add = _risk_label_to_add(issue_number, risk, pr_labels)
-        return LifecyclePlan(
-            issue_number=issue_number,
-            issue_add=(NEEDS_HUMAN_REVIEW,),
-            issue_remove=(),
-            pr_add=pr_add,
-            message=(
-                f"Issue #{issue_number} has no lifecycle label; "
-                f"add {NEEDS_HUMAN_REVIEW} for pull_request ready_for_review"
-            ),
         )
     return _no_transition(issue_number, lifecycle, AGENT_WORKING, "ready_for_review")
 

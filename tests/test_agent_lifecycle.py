@@ -10,15 +10,10 @@ from agent_lifecycle import LifecycleError, LifecyclePlan, main, parse_linked_is
 SECRET = "developer@example.invalid"
 
 
-def _event_file(tmp_path: Path, action: str, body: str, *, draft: bool = False) -> Path:
+def _event_file(tmp_path: Path, action: str, body: str) -> Path:
     path = tmp_path / "event.json"
     path.write_text(
-        json.dumps(
-            {
-                "action": action,
-                "pull_request": {"number": 9, "body": body, "labels": [], "draft": draft},
-            }
-        ),
+        json.dumps({"action": action, "pull_request": {"number": 9, "body": body, "labels": []}}),
         encoding="utf-8",
     )
     return path
@@ -208,24 +203,8 @@ def test_load_event_null_body_has_no_link(tmp_path: Path) -> None:
         parse_linked_issue_number(event.body)
 
 
-def test_load_event_maps_synchronize_using_draft_state(tmp_path: Path) -> None:
-    draft = _event_file(tmp_path, "synchronize", "Closes #8\n", draft=True)
-    assert agent_lifecycle.load_pull_request_event(draft).action == "opened"
-    ready = tmp_path / "ready.json"
-    ready.write_text(
-        json.dumps(
-            {
-                "action": "synchronize",
-                "pull_request": {"number": 9, "body": "Closes #8\n", "labels": [], "draft": False},
-            }
-        ),
-        encoding="utf-8",
-    )
-    assert agent_lifecycle.load_pull_request_event(ready).action == "ready_for_review"
-
-
 def test_load_event_rejects_unsupported_action(tmp_path: Path) -> None:
-    event = _event_file(tmp_path, "edited", "Closes #8\n")
+    event = _event_file(tmp_path, "synchronize", "Closes #8\n")
     with pytest.raises(LifecycleError, match="not a supported pull_request lifecycle event"):
         agent_lifecycle.load_pull_request_event(event)
 
@@ -277,12 +256,14 @@ def test_opened_without_lifecycle_label_does_not_plan_mutation() -> None:
     assert plan.issue_add == ()
 
 
-def test_ready_for_review_without_lifecycle_label_adds_human_review() -> None:
+def test_ready_for_review_without_lifecycle_label_does_not_plan_mutation() -> None:
     plan = plan_lifecycle("ready_for_review", 10, ("risk:low",), ())
-    assert plan.issue_add == ("needs:human-review",)
+    assert plan.noop is True
+    assert plan.issue_add == ()
     assert plan.issue_remove == ()
-    assert plan.pr_add == ("risk:low",)
-    assert "agent:ready" not in plan.issue_add
+    assert plan.pr_add == ()
+    assert "absent" in plan.message
+    assert "agent:working" in plan.message
 
 
 def test_multiple_pr_risk_labels_do_not_plan_mutation() -> None:
@@ -294,7 +275,7 @@ def test_parse_accepts_crlf_and_surrounding_whitespace() -> None:
     assert parse_linked_issue_number("## Linked task\r\n\r\n  Closes #12  \r\n") == 12
 
 
-def test_cli_ready_for_review_with_only_risk_label(tmp_path: Path) -> None:
+def test_cli_ready_for_review_without_lifecycle_is_noop(tmp_path: Path) -> None:
     event = _event_file(tmp_path, "ready_for_review", "Closes #10\n")
     stdout = StringIO()
     assert (
@@ -313,10 +294,11 @@ def test_cli_ready_for_review_with_only_risk_label(tmp_path: Path) -> None:
         == 0
     )
     plan = json.loads(stdout.getvalue())
-    assert plan["issue_add"] == ["needs:human-review"]
+    assert plan["issue_add"] == []
     assert plan["issue_remove"] == []
-    assert plan["pr_add"] == ["risk:low"]
-    assert plan["noop"] is False
+    assert plan["pr_add"] == []
+    assert plan["noop"] is True
+    assert "absent" in plan["message"]
 
 
 def test_cli_rejects_non_string_label_items(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
