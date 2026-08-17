@@ -528,7 +528,7 @@ def test_detect_dominant_tool_integer_share_just_below_threshold() -> None:
             _tool("Grep", calls=5),
         )
     )
-    assert 6 * 100 < 11 * DOMINANT_TOOL_SHARE_THRESHOLD_PERCENT
+    assert 11 * DOMINANT_TOOL_SHARE_THRESHOLD_PERCENT > 6 * 100
     assert findings is None
 
 
