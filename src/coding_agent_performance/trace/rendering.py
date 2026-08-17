@@ -25,6 +25,7 @@ _TOOL_NAME_MAX_WIDTH = 24
 
 def summary_to_dict(summary: TraceSummary) -> dict[str, object]:
     """Serialize a summary through an explicit field allowlist."""
+    dominant = summary.insights.dominant_tool
     return {
         "schema_version": summary.schema_version,
         "capture": {
@@ -158,6 +159,16 @@ def summary_to_dict(summary: TraceSummary) -> dict[str, object]:
                 }
                 for finding in summary.insights.high_tool_result_volume
             ],
+            "dominant_tool": (
+                None
+                if dominant is None
+                else {
+                    "tool_name": dominant.tool_name,
+                    "call_count": dominant.call_count,
+                    "total_calls": dominant.total_calls,
+                    "share_percent": dominant.share_percent,
+                }
+            ),
         },
     }
 
@@ -276,6 +287,12 @@ def _insight_lines(insights: Insights) -> list[str]:
         lines.extend(
             f"- {finding.tool_name}: {finding.result_bytes} result bytes"
             for finding in insights.high_tool_result_volume
+        )
+    if insights.dominant_tool is not None:
+        finding = insights.dominant_tool
+        lines.append("Dominant tool")
+        lines.append(
+            f"- {finding.tool_name}: {finding.call_count}/{finding.total_calls} calls ({finding.share_percent}%)"
         )
     return lines
 

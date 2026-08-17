@@ -116,5 +116,25 @@ oversized.
 Findings are ordered deterministically by tool name. The array is empty when no
 tools meet the threshold.
 
+`insights.dominant_tool` is a single finding or `null`. A finding is emitted
+when the capture has at least 10 total tool calls and one tool accounts for at
+least 60% of those calls. This reports usage concentration only; it does not
+judge efficiency or recommend another tool.
+
+Share comparisons use integer arithmetic:
+`call_count * 100 >= total_calls * 60`. `share_percent` is
+`call_count * 100 // total_calls`. When multiple tools share the qualifying
+maximum call count, the lexicographically first tool name is selected.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `tool_name` | string | The tool with the dominant share of calls |
+| `call_count` | integer | The observed number of calls for that tool |
+| `total_calls` | integer | The capture-level tool call total |
+| `share_percent` | integer | The integer share of total calls, floored |
+
+The field is `null` when the sample is below 10 calls or the top tool is below
+the 60% threshold.
+
 Insight findings contain only allowlisted evidence. Tool arguments, results,
 error payloads, prompts, identifiers, and absolute paths are never included.
