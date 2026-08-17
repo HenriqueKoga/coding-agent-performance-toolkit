@@ -4,6 +4,7 @@ from pathlib import Path
 
 from coding_agent_performance.trace.aggregation import IncrementalSummarizer
 from coding_agent_performance.trace.capture import CaptureEnvelope
+from coding_agent_performance.trace.insights import HIGH_TOOL_RESULT_VOLUME_THRESHOLD
 from coding_agent_performance.trace.records import ToolExecution
 from coding_agent_performance.trace.rendering import (
     escape_filename,
@@ -39,6 +40,7 @@ def _tool_execution(
     prompt_id: str | None = None,
     error_type: str | None = None,
     tool_use_id: str | None = None,
+    result_size_bytes: int = 200,
 ) -> ToolExecution:
     return ToolExecution(
         session_id=session_id,
@@ -47,7 +49,7 @@ def _tool_execution(
         success=success,
         duration_ms=10,
         input_size_bytes=100,
-        result_size_bytes=200,
+        result_size_bytes=result_size_bytes,
         error_type=error_type,
         tool_use_id=tool_use_id,
         event_sequence=event_sequence,
@@ -105,8 +107,9 @@ def test_json_allowlist_keeps_insight_keys() -> None:
     payload = summary_to_dict(summary)
     insights = payload["insights"]
     assert isinstance(insights, dict)
-    assert set(insights) == {"repeated_tool_calls", "repeated_failed_tool_calls"}
+    assert set(insights) == {"repeated_tool_calls", "repeated_failed_tool_calls", "high_tool_result_volume"}
     assert insights["repeated_failed_tool_calls"] == []
+    assert insights["high_tool_result_volume"] == []
 
 
 def test_text_usage_source_labels() -> None:
@@ -344,6 +347,7 @@ def test_insights_in_json_output() -> None:
     assert findings[0]["tool_name"] == "Read"
     assert findings[0]["call_count"] == 8
     assert parsed["insights"]["repeated_failed_tool_calls"] == []
+    assert parsed["insights"]["high_tool_result_volume"] == []
 
 
 def test_insights_multiple_repeated_tools_ordered() -> None:
@@ -403,6 +407,7 @@ def test_insights_contain_only_safe_evidence() -> None:
     for finding in parsed["insights"]["repeated_tool_calls"]:
         assert set(finding.keys()) == {"tool_name", "call_count"}
     assert parsed["insights"]["repeated_failed_tool_calls"] == []
+    assert parsed["insights"]["high_tool_result_volume"] == []
 
 
 def test_repeated_failed_insights_appear_in_text() -> None:
@@ -527,3 +532,166 @@ def test_repeated_failed_insights_contain_only_safe_evidence() -> None:
     parsed = json.loads(payload)
     for finding in parsed["insights"]["repeated_failed_tool_calls"]:
         assert set(finding.keys()) == {"tool_name", "failure_count"}
+
+
+def test_high_tool_result_volume_appears_in_text() -> None:
+    summarizer = IncrementalSummarizer(filename="volume-insights.jsonl")
+    _add_tools(
+        summarizer,
+        _tool_execution("Read", success=True, event_sequence=0, result_size_bytes=196608),
+    )
+    text = render_text(summarizer.finish(Path("volume-insights.jsonl")))
+    assert "Insights" in text
+    assert "High tool result volume" in text
+    assert "- Read: 196608 result bytes" in text
+
+
+def test_high_tool_result_volume_not_present_below_threshold() -> None:
+    summarizer = IncrementalSummarizer(filename="volume-below.jsonl")
+    _add_tools(
+        summarizer,
+        _tool_execution(
+            "Read",
+            success=True,
+            event_sequence=0,
+            result_size_bytes=HIGH_TOOL_RESULT_VOLUME_THRESHOLD - 1,
+        ),
+    )
+    summary = summarizer.finish(Path("volume-below.jsonl"))
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert "High tool result volume" not in text
+    assert parsed["insights"]["high_tool_result_volume"] == []
+
+
+def test_high_tool_result_volume_not_present_when_zero_bytes() -> None:
+    summarizer = IncrementalSummarizer(filename="volume-zero.jsonl")
+    _add_tools(
+        summarizer,
+        _tool_execution("Read", success=True, event_sequence=0, result_size_bytes=0),
+    )
+    summary = summarizer.finish(Path("volume-zero.jsonl"))
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert "High tool result volume" not in text
+    assert parsed["insights"]["high_tool_result_volume"] == []
+
+
+def test_high_tool_result_volume_in_json_output() -> None:
+    summarizer = IncrementalSummarizer(filename="volume-insights.jsonl")
+    _add_tools(
+        summarizer,
+        _tool_execution("Read", success=True, event_sequence=0, result_size_bytes=196608),
+    )
+    parsed = json.loads(render_json(summarizer.finish(Path("volume-insights.jsonl"))))
+    findings = parsed["insights"]["high_tool_result_volume"]
+    assert findings == [{"tool_name": "Read", "result_bytes": 196608}]
+
+
+def test_high_tool_result_volume_at_threshold_in_json_output() -> None:
+    summarizer = IncrementalSummarizer(filename="volume-at-threshold.jsonl")
+    _add_tools(
+        summarizer,
+        _tool_execution(
+            "Read",
+            success=True,
+            event_sequence=0,
+            result_size_bytes=HIGH_TOOL_RESULT_VOLUME_THRESHOLD,
+        ),
+    )
+    parsed = json.loads(render_json(summarizer.finish(Path("volume-at-threshold.jsonl"))))
+    assert parsed["insights"]["high_tool_result_volume"] == [
+        {"tool_name": "Read", "result_bytes": HIGH_TOOL_RESULT_VOLUME_THRESHOLD}
+    ]
+
+
+def test_high_tool_result_volume_multiple_tools_ordered() -> None:
+    summarizer = IncrementalSummarizer(filename="multi-volume.jsonl")
+    _add_tools(
+        summarizer,
+        _tool_execution("Zebra", success=True, event_sequence=0, result_size_bytes=196608),
+        _tool_execution("Apple", success=True, event_sequence=1, result_size_bytes=147456),
+        _tool_execution("Mango", success=True, event_sequence=2, result_size_bytes=HIGH_TOOL_RESULT_VOLUME_THRESHOLD),
+    )
+    summary = summarizer.finish(Path("multi-volume.jsonl"))
+    text = render_text(summary)
+    payload = render_json(summary)
+    assert "- Apple: 147456 result bytes" in text
+    assert f"- Mango: {HIGH_TOOL_RESULT_VOLUME_THRESHOLD} result bytes" in text
+    assert "- Zebra: 196608 result bytes" in text
+    apple_pos = text.index("- Apple: 147456 result bytes")
+    mango_pos = text.index(f"- Mango: {HIGH_TOOL_RESULT_VOLUME_THRESHOLD} result bytes")
+    zebra_pos = text.index("- Zebra: 196608 result bytes")
+    assert apple_pos < mango_pos < zebra_pos
+    parsed = json.loads(payload)
+    assert [finding["tool_name"] for finding in parsed["insights"]["high_tool_result_volume"]] == [
+        "Apple",
+        "Mango",
+        "Zebra",
+    ]
+    assert render_text(summary) == text
+    assert render_json(summary) == payload
+
+
+def test_high_tool_result_volume_coexists_with_existing_insights() -> None:
+    summarizer = IncrementalSummarizer(filename="coexist-insights.jsonl")
+    records = [
+        *(_tool_execution("Read", success=True, event_sequence=i, result_size_bytes=65536) for i in range(3)),
+        *(
+            _tool_execution(
+                "Bash",
+                success=False,
+                event_sequence=i + 3,
+                error_type="ShellError",
+                result_size_bytes=0,
+            )
+            for i in range(3)
+        ),
+    ]
+    _add_tools(summarizer, *records)
+    summary = summarizer.finish(Path("coexist-insights.jsonl"))
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert "- Bash: 3 calls" in text
+    assert "- Read: 3 calls" in text
+    assert "- Bash: 3 failures" in text
+    assert "- Read: 196608 result bytes" in text
+    assert parsed["insights"]["repeated_tool_calls"] == [
+        {"tool_name": "Bash", "call_count": 3},
+        {"tool_name": "Read", "call_count": 3},
+    ]
+    assert parsed["insights"]["repeated_failed_tool_calls"] == [{"tool_name": "Bash", "failure_count": 3}]
+    assert parsed["insights"]["high_tool_result_volume"] == [{"tool_name": "Read", "result_bytes": 196608}]
+
+
+def test_high_tool_result_volume_contains_only_safe_evidence() -> None:
+    summarizer = IncrementalSummarizer(filename="volume-privacy.jsonl")
+    _add_tools(
+        summarizer,
+        _tool_execution(
+            "Read",
+            success=True,
+            event_sequence=0,
+            session_id="secret-session-id",
+            prompt_id="secret-prompt-id",
+            tool_use_id="secret-tool-id",
+            result_size_bytes=196608,
+        ),
+    )
+    summary = summarizer.finish(Path("volume-privacy.jsonl"))
+    text = render_text(summary)
+    payload = render_json(summary)
+    for marker in (
+        "secret-session-id",
+        "secret-prompt-id",
+        "secret-tool-id",
+        "file contents",
+        "/tmp/",
+        "arguments",
+    ):
+        assert marker not in text
+        assert marker not in payload
+    parsed = json.loads(payload)
+    for finding in parsed["insights"]["high_tool_result_volume"]:
+        assert set(finding.keys()) == {"tool_name", "result_bytes"}
+        assert isinstance(finding["result_bytes"], int)
