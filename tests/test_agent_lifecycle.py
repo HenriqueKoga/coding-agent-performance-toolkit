@@ -449,7 +449,7 @@ def test_rest_read_exhausts_retryable_status(status: int) -> None:
 @pytest.mark.parametrize("status", [400, 401, 403, 404, 422, 429])
 def test_rest_read_non_retryable_status_fails_immediately(status: int) -> None:
     api = _ScriptedGitHubApi([_http_error(status, body=SECRET), _ok_response("agent:ready", "risk:low")])
-    with pytest.raises(LifecycleError, match=f"GitHub REST issue #8 read failed with HTTP {status}$") as exc_info:
+    with pytest.raises(LifecycleError, match=rf"GitHub REST issue #8 read failed with HTTP {status}$") as exc_info:
         _read_labels(api)
     assert api.paths == ["repos/owner/repo/issues/8"]
     assert api.sleeps == []
@@ -460,7 +460,7 @@ def test_rest_read_non_retryable_status_fails_immediately(status: int) -> None:
 
 def test_rest_read_unknown_failure_fails_immediately() -> None:
     api = _ScriptedGitHubApi([GitHubApiResponse(returncode=1, stdout=SECRET, stderr=f"gh crashed {SECRET}")])
-    with pytest.raises(LifecycleError, match="GitHub REST issue #8 read failed after 1 attempt$") as exc_info:
+    with pytest.raises(LifecycleError, match=r"GitHub REST issue #8 read failed after 1 attempt$") as exc_info:
         _read_labels(api)
     assert api.paths == ["repos/owner/repo/issues/8"]
     assert api.sleeps == []
