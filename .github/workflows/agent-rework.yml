@@ -21,10 +21,11 @@ jobs:
       issues: read
       pull-requests: write
     steps:
-      - name: Check out rework scripts
+      - name: Check out trusted rework scripts
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v5

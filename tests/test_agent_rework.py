@@ -910,6 +910,8 @@ def test_workflow_is_dedicated_and_least_privilege() -> None:
     assert "chatgpt-codex-connector[bot]" in workflow
     assert "sender.type == 'Bot'" in workflow
     assert "agent_rework.py dispatch" in workflow
+    assert "ref: ${{ github.event.pull_request.base.sha }}" in workflow
+    assert "github.event.pull_request.head.sha" not in workflow
     assert "secrets.CURSOR_API_KEY" in workflow
     assert "api.cursor.com" not in workflow
     assert "issues: write" not in workflow
