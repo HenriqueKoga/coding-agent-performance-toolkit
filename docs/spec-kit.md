@@ -107,7 +107,9 @@ Use this path for new roadmap work. The registered `speckit` workflow is truncat
 /speckit.clarify        # when the spec still has NEEDS CLARIFICATION items
 /speckit.plan
 /speckit.tasks
-/speckit.analyze        # before claiming the spec is implementation-ready
+/speckit.analyze        # read-only; does not write files
+        ↓
+persist approved report as specs/<feature>/analyze.md
         ↓
 manual GitHub Agent Task Issue
         ↓
@@ -142,7 +144,11 @@ Break the plan into actionable tasks with real file paths. CAPT behavior changes
 
 ### analyze
 
-Read-only consistency check across `spec.md`, `plan.md`, and `tasks.md`. Fix gaps at the source and re-run. For the pilot, the report is saved as `analyze.md` in the feature directory so the path is reviewable.
+Run `/speckit.analyze` as the read-only consistency check across `spec.md`, `plan.md`, and `tasks.md`.
+
+The command itself does not write files. After reviewing the returned report, explicitly persist the approved report as `specs/<feature>/analyze.md` so it can be reviewed with the remaining specification artifacts.
+
+Do not modify `spec.md`, `plan.md`, or `tasks.md` from the analyze command itself. Fix gaps at the source and re-run `/speckit.analyze` when the artifacts change.
 
 ## Bridge to GitHub Issues
 
