@@ -41,6 +41,7 @@ CURSOR_AGENTS_URL = "https://api.cursor.com/v1/agents"
 CURSOR_AGENT_URL_PREFIX = "https://cursor.com/agents/"
 CURSOR_HTTP_TIMEOUT_SECONDS = 30
 AGENT_ID_CONFLICT = "agent_id_conflict"
+HUMAN_SENDER_TYPE = "User"
 
 _AGENT_ID_NAMESPACE = uuid.NAMESPACE_URL
 
@@ -62,6 +63,7 @@ class DispatchIssue:
 @dataclass(frozen=True, slots=True)
 class LabeledIssueEvent:
     added_label: str
+    sender_type: str
     issue: DispatchIssue
 
 
@@ -110,11 +112,13 @@ def load_labeled_issue_event(path: Path) -> LabeledIssueEvent:
     if payload.get("action") != "labeled":
         raise DispatchError("GitHub event action is not a supported issues labeled event")
     added_label = _require_label_name(payload.get("label"), "GitHub event label")
+    sender_type = _require_human_sender(payload.get("sender"))
     issue_payload = payload.get("issue")
     if not isinstance(issue_payload, dict):
         raise DispatchError("GitHub event does not contain issue metadata")
     return LabeledIssueEvent(
         added_label=added_label,
+        sender_type=sender_type,
         issue=dispatch_issue_from_mapping(issue_payload, "GitHub event issue"),
     )
 
@@ -400,6 +404,17 @@ def _require_label_name(value: object, what: str) -> str:
     if not isinstance(name, str) or not name:
         raise DispatchError(f"{what} name is not a string")
     return name
+
+
+def _require_human_sender(value: object) -> str:
+    if not isinstance(value, dict):
+        raise DispatchError("GitHub event sender is missing")
+    sender_type = value.get("type")
+    if not isinstance(sender_type, str) or not sender_type:
+        raise DispatchError("GitHub event sender type is not a string")
+    if sender_type != HUMAN_SENDER_TYPE:
+        raise DispatchError(f"GitHub event sender type is {sender_type}; dispatch requires {HUMAN_SENDER_TYPE}")
+    return sender_type
 
 
 def _issue_from_rest_payload(text: str) -> DispatchIssue:

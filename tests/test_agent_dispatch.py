@@ -60,6 +60,7 @@ def _event_file(
     action: str = "labeled",
     added_label: str = "agent:ready",
     issue: dict[str, object] | None = None,
+    sender_type: str | None = "User",
 ) -> Path:
     path = tmp_path / "event.json"
     payload: dict[str, object] = {
@@ -67,6 +68,8 @@ def _event_file(
         "label": {"name": added_label},
         "issue": _issue_mapping() if issue is None else issue,
     }
+    if sender_type is not None:
+        payload["sender"] = {"type": sender_type}
     path.write_text(json.dumps(payload), encoding="utf-8")
     return path
 
@@ -361,6 +364,7 @@ def test_duplicate_submit_does_not_look_like_a_second_create() -> None:
 def test_load_labeled_event(tmp_path: Path) -> None:
     event = load_labeled_issue_event(_event_file(tmp_path))
     assert event.added_label == "agent:ready"
+    assert event.sender_type == "User"
     assert event.issue.number == 18
     assert event.issue.state == "open"
     assert event.issue.title == "Implement dispatch"
@@ -373,6 +377,42 @@ def test_load_labeled_event(tmp_path: Path) -> None:
 def test_load_event_rejects_unsupported_action(tmp_path: Path) -> None:
     event = _event_file(tmp_path, action="unlabeled")
     with pytest.raises(DispatchError, match="not a supported issues labeled event"):
+        load_labeled_issue_event(event)
+
+
+def test_bot_sender_does_not_dispatch(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    event = _event_file(tmp_path, sender_type="Bot")
+    with pytest.raises(DispatchError, match=r"sender type is Bot; dispatch requires User"):
+        load_labeled_issue_event(event)
+    stdout = StringIO()
+    assert main(["parse-event", "--event-file", str(event)], stdout=stdout) == 1
+    captured = capsys.readouterr()
+    assert stdout.getvalue() == ""
+    assert "dispatch requires User" in captured.err
+    assert ISSUE_BODY_SECRET not in captured.err
+
+
+def test_bot_sender_error_omits_login(tmp_path: Path) -> None:
+    path = tmp_path / "event.json"
+    path.write_text(
+        json.dumps(
+            {
+                "action": "labeled",
+                "label": {"name": "agent:ready"},
+                "sender": {"type": "Bot", "login": SECRET},
+                "issue": _issue_mapping(),
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(DispatchError, match=r"sender type is Bot; dispatch requires User") as exc_info:
+        load_labeled_issue_event(path)
+    assert SECRET not in str(exc_info.value)
+
+
+def test_missing_sender_does_not_dispatch(tmp_path: Path) -> None:
+    event = _event_file(tmp_path, sender_type=None)
+    with pytest.raises(DispatchError, match="sender is missing"):
         load_labeled_issue_event(event)
 
 
@@ -541,6 +581,7 @@ def test_workflow_is_dedicated_and_least_privilege() -> None:
     assert "on:\n  issues:" in workflow
     assert "labeled" in workflow
     assert "github.event.label.name == 'agent:ready'" in workflow
+    assert "github.event.sender.type == 'User'" in workflow
     assert "secrets.CURSOR_API_KEY" in workflow
     assert "api.cursor.com" not in workflow
     assert "issues: write" not in workflow

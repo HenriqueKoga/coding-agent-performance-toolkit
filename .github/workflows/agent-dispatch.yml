@@ -14,7 +14,7 @@ permissions: {}
 jobs:
   dispatch:
     name: Dispatch Cursor Cloud Agent
-    if: github.event.label.name == 'agent:ready'
+    if: github.event.label.name == 'agent:ready' && github.event.sender.type == 'User'
     runs-on: ubuntu-latest
     permissions:
       contents: read
