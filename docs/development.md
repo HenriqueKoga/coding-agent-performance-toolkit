@@ -46,7 +46,7 @@ src/coding_agent_performance/
     trace/                 Collect, store, decode, summarize, and render
 docs/                      Product, architecture, development, and ADRs
 tests/                     Synthetic fixtures and focused tests
-.github/                   Issue/PR templates, CI, and Agent Task lifecycle automation
+.github/                   Issue/PR templates, CI, Agent Task lifecycle, and Cursor dispatch
 ```
 
 Related documents:
@@ -93,6 +93,8 @@ Sets priorities. Approves scope changes. Decides trade-offs. Authorizes external
 
 GitHub Actions maintains Agent Task labels after a human has applied `agent:ready`. The implementation agent must not orchestrate those transitions.
 
+Applying `agent:ready` to an open Issue starts a dedicated dispatch workflow. That workflow validates the Issue, then creates exactly one Cursor Cloud Agent through `POST https://api.cursor.com/v1/agents`. It does not change lifecycle or risk labels. `agent:working` still happens only when the implementation Draft PR opens.
+
 A pull request whose body contains exactly one `Closes #<issue>` line, matching the pull-request template:
 
 - moves the linked Issue from `agent:ready` to `agent:working` when the PR is opened, and copies that Issue's single `risk:*` label to the PR
@@ -103,6 +105,8 @@ Unexpected lifecycle states, including a missing lifecycle label, produce a diag
 `agent:ready` is never applied automatically. Risk classification is never inferred. Merged PRs close Issues through GitHub's normal `Closes #N` behavior.
 
 Parsing, REST Issue label reads, retry decisions, and transition rules live in `.github/scripts/agent_lifecycle.py` and are tested locally with synthetic GitHub responses. Issue label reads use GitHub REST via `gh api repos/{owner}/{repo}/issues/{n}` rather than GraphQL. HTTP 500, 502, 503, and 504 are retried a small bounded number of times; other failures fail immediately and perform no label mutation. Live `gh api` HTTP, label mutation, event delivery, and token permissions require the real `pull_request` workflow environment and are not reproduced by the local test suite.
+
+Cursor dispatch lives in `.github/workflows/agent-dispatch.yml` and `.github/scripts/agent_dispatch.py`. It runs only for the `issues.labeled` event when a human `User` applies `agent:ready`; GitHub Apps and bots that add the label do not dispatch. Before any Cursor API call it requires an open GitHub Issue, not a pull request, with exactly one lifecycle label (`agent:ready`) and exactly one `risk:*` label. The Cursor request targets `https://github.com/HenriqueKoga/coding-agent-performance-toolkit` at `main`, omits a model so Cursor uses the account default, and sets `autoCreatePR` to `false` so the implementation agent opens a Draft PR. Duplicate `agent:ready` events reuse a deterministic client-supplied `agentId` derived from the repository and Issue number; a Cursor `409 agent_id_conflict` is treated as already dispatched rather than as a second successful create. Authentication uses the repository Actions secret `CURSOR_API_KEY`. The workflow never prints that secret or Cursor response payloads, and it never mutates Issue labels. Live Cursor HTTP, secret availability, and GitHub event delivery require the real `issues.labeled` workflow environment and are not reproduced by the local test suite.
 
 ## Issue and task contract
 
