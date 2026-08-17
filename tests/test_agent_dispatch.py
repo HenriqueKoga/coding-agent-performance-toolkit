@@ -8,7 +8,6 @@ import pytest
 
 import agent_dispatch
 from agent_dispatch import (
-    AGENT_ID_CONFLICT,
     CURSOR_AGENTS_URL,
     OWNER_REPO,
     REPOSITORY_URL,
@@ -28,6 +27,7 @@ from agent_dispatch import (
     validate_dispatch_preconditions,
 )
 from agent_lifecycle import GitHubApiResponse, plan_lifecycle
+from cursor_agents import AGENT_ID_CONFLICT
 
 SECRET = "cursor-test-key-invalid"
 ISSUE_BODY_SECRET = "developer@example.invalid"
@@ -473,7 +473,7 @@ def test_cli_submit_created(monkeypatch: pytest.MonkeyPatch) -> None:
         del url, headers, body
         return HttpResponse(201, json.dumps({"agent": {"id": request["agentId"]}, "run": {"id": "run-9"}}))
 
-    monkeypatch.setattr(agent_dispatch, "_post_json", _post)
+    monkeypatch.setattr(agent_dispatch, "post_json", _post)
     monkeypatch.setenv("CURSOR_API_KEY", SECRET)
     stdout = StringIO()
     assert main(["submit", "--issue", "18", "--request-json", json.dumps(request)], stdout=stdout) == 0
@@ -510,7 +510,7 @@ def test_cli_dispatch_uses_rest_issue_and_posts_once(tmp_path: Path, monkeypatch
         return HttpResponse(201, json.dumps({"agent": {"id": request["agentId"]}, "run": {"id": "run-2"}}))
 
     monkeypatch.setattr(agent_dispatch, "_run_gh_api", api)
-    monkeypatch.setattr(agent_dispatch, "_post_json", _post)
+    monkeypatch.setattr(agent_dispatch, "post_json", _post)
     monkeypatch.setenv("CURSOR_API_KEY", SECRET)
     stdout = StringIO()
     assert main(["dispatch", "--event-file", str(event), "--repo", "owner/repo"], stdout=stdout) == 0
@@ -534,7 +534,7 @@ def test_cli_dispatch_does_not_post_when_validation_fails(
         raise AssertionError("Cursor API must not be called")
 
     monkeypatch.setattr(agent_dispatch, "_run_gh_api", api)
-    monkeypatch.setattr(agent_dispatch, "_post_json", _post)
+    monkeypatch.setattr(agent_dispatch, "post_json", _post)
     monkeypatch.setenv("CURSOR_API_KEY", SECRET)
     stdout = StringIO()
     assert main(["dispatch", "--event-file", str(event), "--repo", "owner/repo"], stdout=stdout) == 1

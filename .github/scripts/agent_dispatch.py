@@ -7,14 +7,11 @@ risk labels.
 """
 
 import argparse
-import base64
 import json
 import os
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -31,16 +28,20 @@ from agent_lifecycle import (
     github_http_status_from_stderr,
     is_retryable_github_http_status,
 )
+from cursor_agents import (
+    CURSOR_AGENTS_URL,
+    CursorApiError,
+    HttpResponse,
+    authorization_header,
+    interpret_create_agent_response,
+    post_json,
+)
 
 type DispatchOutcome = Literal["created", "already_dispatched"]
 
 OWNER_REPO = "HenriqueKoga/coding-agent-performance-toolkit"
 REPOSITORY_URL = f"https://github.com/{OWNER_REPO}"
 STARTING_REF = "main"
-CURSOR_AGENTS_URL = "https://api.cursor.com/v1/agents"
-CURSOR_AGENT_URL_PREFIX = "https://cursor.com/agents/"
-CURSOR_HTTP_TIMEOUT_SECONDS = 30
-AGENT_ID_CONFLICT = "agent_id_conflict"
 HUMAN_SENDER_TYPE = "User"
 
 _AGENT_ID_NAMESPACE = uuid.NAMESPACE_URL
@@ -99,12 +100,6 @@ class DispatchResult:
             "run_id": self.run_id,
             "message": self.message,
         }
-
-
-@dataclass(frozen=True, slots=True)
-class HttpResponse:
-    status_code: int
-    body: str
 
 
 def load_labeled_issue_event(path: Path) -> LabeledIssueEvent:
@@ -267,97 +262,31 @@ def submit_create_agent(
     payload = json.dumps(dict(request), allow_nan=False).encode("utf-8")
     headers = {
         "Accept": "application/json",
-        "Authorization": _authorization_header(api_key),
+        "Authorization": authorization_header(api_key),
         "Content-Type": "application/json",
     }
-    poster = _post_json if post is None else post
-    response = poster(CURSOR_AGENTS_URL, headers, payload)
-    return interpret_cursor_create_response(issue_number, agent_id, response)
+    poster = post_json if post is None else post
+    try:
+        response = poster(CURSOR_AGENTS_URL, headers, payload)
+        return interpret_cursor_create_response(issue_number, agent_id, response)
+    except CursorApiError as exc:
+        raise DispatchError(str(exc)) from None
 
 
 def interpret_cursor_create_response(issue_number: int, agent_id: str, response: HttpResponse) -> DispatchResult:
     _require_positive_issue_number(issue_number)
-    if response.status_code == 201:
-        return _created_result(issue_number, agent_id, response.body)
-    if response.status_code == 409:
-        code = _cursor_error_code(response.body)
-        if code == AGENT_ID_CONFLICT:
-            return DispatchResult(
-                outcome="already_dispatched",
-                issue_number=issue_number,
-                agent_id=agent_id,
-                agent_url=_agent_url(agent_id),
-                run_id=None,
-                message=(
-                    f"Issue #{issue_number} already dispatched to Cursor agent {agent_id}; not creating another agent"
-                ),
-            )
-        if code is None:
-            raise DispatchError("Cursor API returned HTTP 409")
-        raise DispatchError(f"Cursor API returned HTTP 409 ({code})")
-    raise DispatchError(f"Cursor API returned HTTP {response.status_code}")
-
-
-def _created_result(issue_number: int, agent_id: str, body: str) -> DispatchResult:
-    parsed = _load_json_value(body)
-    agent_url = _agent_url(agent_id)
-    run_id: str | None = None
-    if isinstance(parsed, dict):
-        agent = parsed.get("agent")
-        if isinstance(agent, dict):
-            returned_id = agent.get("id")
-            if isinstance(returned_id, str) and returned_id:
-                agent_id = returned_id
-            returned_url = agent.get("url")
-            if isinstance(returned_url, str) and returned_url.startswith(CURSOR_AGENT_URL_PREFIX):
-                agent_url = returned_url
-        run = parsed.get("run")
-        if isinstance(run, dict):
-            returned_run = run.get("id")
-            if isinstance(returned_run, str) and returned_run:
-                run_id = returned_run
-    return DispatchResult(
-        outcome="created",
-        issue_number=issue_number,
-        agent_id=agent_id,
-        agent_url=agent_url,
-        run_id=run_id,
-        message=f"Issue #{issue_number} dispatched to Cursor agent {agent_id}",
-    )
-
-
-def _cursor_error_code(body: str) -> str | None:
-    parsed = _load_json_value(body)
-    if not isinstance(parsed, dict):
-        return None
-    error = parsed.get("error")
-    if not isinstance(error, dict):
-        return None
-    code = error.get("code")
-    if not isinstance(code, str) or not code:
-        return None
-    return code
-
-
-def _authorization_header(api_key: str) -> str:
-    token = base64.b64encode(f"{api_key}:".encode()).decode("ascii")
-    return f"Basic {token}"
-
-
-def _post_json(url: str, headers: dict[str, str], body: bytes) -> HttpResponse:
-    request = urllib.request.Request(url, data=body, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(request, timeout=CURSOR_HTTP_TIMEOUT_SECONDS) as response:
-            return HttpResponse(int(response.status), response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        payload = exc.read().decode("utf-8", errors="replace")
-        return HttpResponse(int(exc.code), payload)
-    except urllib.error.URLError:
-        raise DispatchError("Cursor API request failed") from None
-
-
-def _agent_url(agent_id: str) -> str:
-    return f"{CURSOR_AGENT_URL_PREFIX}{agent_id}"
+        created = interpret_create_agent_response(f"Issue #{issue_number}", agent_id, response)
+    except CursorApiError as exc:
+        raise DispatchError(str(exc)) from None
+    return DispatchResult(
+        outcome=created.outcome,
+        issue_number=issue_number,
+        agent_id=created.agent_id,
+        agent_url=created.agent_url,
+        run_id=created.run_id,
+        message=created.message,
+    )
 
 
 def _require_single_risk(issue_number: int, labels: Sequence[str]) -> str:
