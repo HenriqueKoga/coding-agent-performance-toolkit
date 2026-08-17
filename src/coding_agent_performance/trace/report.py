@@ -87,6 +87,17 @@ class ModelUsage:
     by_query_source: tuple[QuerySourceBreakdown, ...]
 
 
+def tool_success_rate_bps(successes: int, calls: int) -> int | None:
+    """Return successes per 10,000 calls, or None when there are no calls.
+
+    Uses integer arithmetic so the rate is stable across serialization. This is
+    descriptive telemetry, not a quality or performance score.
+    """
+    if calls == 0:
+        return None
+    return (successes * 10_000) // calls
+
+
 @dataclass(frozen=True, slots=True)
 class ToolStats:
     calls: int
@@ -96,6 +107,10 @@ class ToolStats:
     result_bytes: int
     duration_ms: DurationStats
     by_name: tuple[ToolBreakdown, ...]
+
+    @property
+    def success_rate_bps(self) -> int | None:
+        return tool_success_rate_bps(self.successes, self.calls)
 
 
 @dataclass(frozen=True, slots=True)
