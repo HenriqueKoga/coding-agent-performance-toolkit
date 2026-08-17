@@ -151,9 +151,16 @@ class RepeatedFailedToolCall:
 
 
 @dataclass(frozen=True, slots=True)
+class HighToolResultVolume:
+    tool_name: str
+    result_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
 class Insights:
     repeated_tool_calls: tuple[RepeatedToolCall, ...]
     repeated_failed_tool_calls: tuple[RepeatedFailedToolCall, ...]
+    high_tool_result_volume: tuple[HighToolResultVolume, ...]
 
 
 @dataclass(frozen=True, slots=True)

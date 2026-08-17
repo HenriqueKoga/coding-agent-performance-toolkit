@@ -1,6 +1,7 @@
 """Deterministic insight rules over trace summaries."""
 
 from coding_agent_performance.trace.report import (
+    HighToolResultVolume,
     Insights,
     RepeatedFailedToolCall,
     RepeatedToolCall,
@@ -9,6 +10,7 @@ from coding_agent_performance.trace.report import (
 
 REPEATED_TOOL_CALL_THRESHOLD = 3
 REPEATED_FAILED_TOOL_CALL_THRESHOLD = 3
+HIGH_TOOL_RESULT_VOLUME_THRESHOLD = 128 * 1024
 
 
 def detect_repeated_tool_calls(tools: ToolStats) -> tuple[RepeatedToolCall, ...]:
@@ -40,9 +42,26 @@ def detect_repeated_failed_tool_calls(tools: ToolStats) -> tuple[RepeatedFailedT
     return tuple(findings)
 
 
+def detect_high_tool_result_volume(tools: ToolStats) -> tuple[HighToolResultVolume, ...]:
+    """Identify tools whose cumulative result bytes meet or exceed the threshold.
+
+    Returns findings ordered deterministically by tool name. The threshold
+    applies to per-tool cumulative `result_bytes` within one capture, not to
+    any individual tool call.
+    """
+    findings = [
+        HighToolResultVolume(tool_name=breakdown.name, result_bytes=breakdown.result_bytes)
+        for breakdown in tools.by_name
+        if breakdown.result_bytes >= HIGH_TOOL_RESULT_VOLUME_THRESHOLD
+    ]
+    findings.sort(key=lambda f: f.tool_name)
+    return tuple(findings)
+
+
 def compute_insights(tools: ToolStats) -> Insights:
     """Compute all deterministic insights for a trace summary."""
     return Insights(
         repeated_tool_calls=detect_repeated_tool_calls(tools),
         repeated_failed_tool_calls=detect_repeated_failed_tool_calls(tools),
+        high_tool_result_volume=detect_high_tool_result_volume(tools),
     )

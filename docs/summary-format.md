@@ -102,5 +102,19 @@ failure/error outcomes are counted. Successful calls do not increment the count.
 Findings are ordered deterministically by tool name. The array is empty when no
 tools meet the threshold.
 
+`insights.high_tool_result_volume` is an array of findings. Each finding
+identifies a tool whose cumulative result bytes within the summarized capture
+met or exceeded the deterministic threshold (currently 131072, which is 128 KiB).
+This measures total result volume per tool, not whether any individual call was
+oversized.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `tool_name` | string | The tool with high cumulative result volume |
+| `result_bytes` | integer | The observed cumulative result bytes for that tool |
+
+Findings are ordered deterministically by tool name. The array is empty when no
+tools meet the threshold.
+
 Insight findings contain only allowlisted evidence. Tool arguments, results,
 error payloads, prompts, identifiers, and absolute paths are never included.

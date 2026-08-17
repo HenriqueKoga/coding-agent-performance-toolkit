@@ -151,6 +151,13 @@ def summary_to_dict(summary: TraceSummary) -> dict[str, object]:
                 }
                 for finding in summary.insights.repeated_failed_tool_calls
             ],
+            "high_tool_result_volume": [
+                {
+                    "tool_name": finding.tool_name,
+                    "result_bytes": finding.result_bytes,
+                }
+                for finding in summary.insights.high_tool_result_volume
+            ],
         },
     }
 
@@ -263,6 +270,12 @@ def _insight_lines(insights: Insights) -> list[str]:
         lines.extend(
             f"- {finding.tool_name}: {finding.failure_count} failures"
             for finding in insights.repeated_failed_tool_calls
+        )
+    if insights.high_tool_result_volume:
+        lines.append("High tool result volume")
+        lines.extend(
+            f"- {finding.tool_name}: {finding.result_bytes} result bytes"
+            for finding in insights.high_tool_result_volume
         )
     return lines
 
