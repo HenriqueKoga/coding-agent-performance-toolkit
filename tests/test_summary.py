@@ -6,7 +6,12 @@ import pytest
 
 from coding_agent_performance.trace.capture import CaptureError
 from coding_agent_performance.trace.rendering import render_json, render_text
-from coding_agent_performance.trace.report import RepeatedFailedToolCall
+from coding_agent_performance.trace.report import (
+    FailureRate,
+    HighToolFailureRate,
+    RepeatedFailedToolCall,
+    tool_success_rate_bps,
+)
 from coding_agent_performance.trace.summary import summarize_capture
 from tests.helpers.otlp import envelope, log_record, number_point, resource_logs, resource_metrics, sum_metric
 from tests.helpers.synthetic_capture import FIXTURE_PATH, write_synthetic_capture
@@ -35,6 +40,7 @@ def test_synthetic_fixture_uses_api_request_events() -> None:
     assert summary.tools.calls == 3
     assert summary.tools.successes == 2
     assert summary.tools.failures == 1
+    assert summary.tools.success_rate_bps == 6666
     assert summary.tools.input_bytes == 400
     assert summary.tools.result_bytes == 2000
     assert summary.tools.duration_ms.p50 == 300
@@ -262,6 +268,14 @@ def test_repeated_failed_tool_calls_use_explicit_success_outcome(tmp_path: Path)
     assert summary.tools.failures == 4
     assert summary.insights.repeated_tool_calls[0].call_count == 6
     assert summary.insights.repeated_failed_tool_calls == (RepeatedFailedToolCall(tool_name="Bash", failure_count=4),)
+    assert summary.insights.high_tool_failure_rate == (
+        HighToolFailureRate(
+            tool_name="Bash",
+            failed_calls=4,
+            total_calls=6,
+            failure_rate=FailureRate(numerator=2, denominator=3),
+        ),
+    )
     text = render_text(summary)
     payload = render_json(summary)
     for marker in (
@@ -291,3 +305,95 @@ def test_missing_success_is_not_counted_as_failure(tmp_path: Path) -> None:
     summary = summarize_capture(path)
     assert summary.tools.failures == 0
     assert summary.insights.repeated_failed_tool_calls == ()
+    assert summary.insights.high_tool_failure_rate == ()
+
+
+def test_tool_success_rate_bps_zero_calls() -> None:
+    assert tool_success_rate_bps(0, 0) is None
+
+
+def test_tool_success_rate_bps_all_success() -> None:
+    assert tool_success_rate_bps(4, 4) == 10_000
+
+
+def test_tool_success_rate_bps_all_failure() -> None:
+    assert tool_success_rate_bps(0, 5) == 0
+
+
+def test_tool_success_rate_bps_mixed_uses_integer_floor() -> None:
+    assert tool_success_rate_bps(2, 3) == 6666
+    assert tool_success_rate_bps(1, 2) == 5000
+    assert tool_success_rate_bps(1, 3) == 3333
+
+
+def test_metrics_only_capture_has_null_success_rate(tmp_path: Path) -> None:
+    payload = resource_metrics([sum_metric("claude_code.commit.count", [number_point(value=2)], temporality=1)])
+    path = tmp_path / "activity-only.jsonl"
+    path.write_text(json.dumps(envelope(signal="metrics", payload=payload)) + "\n", encoding="utf-8")
+    summary = summarize_capture(path)
+    assert summary.tools.calls == 0
+    assert summary.tools.successes == 0
+    assert summary.tools.failures == 0
+    assert summary.tools.success_rate_bps is None
+
+
+def test_high_tool_failure_rate_uses_explicit_success_outcome(tmp_path: Path) -> None:
+    records = [
+        log_record(
+            event_name="tool_result",
+            attributes={
+                "tool_name": "Bash",
+                "success": False,
+                "duration_ms": 10,
+                "error_type": "ShellError",
+                "error": "Connection timed out to api.example.invalid",
+                "tool_input": {"command": "rm -rf /tmp/synthetic-project"},
+            },
+        )
+        for _ in range(2)
+    ]
+    records.extend(
+        log_record(
+            event_name="tool_result",
+            attributes={
+                "tool_name": "Bash",
+                "success": True,
+                "duration_ms": 10,
+                "tool_result": "error: this successful output mentions failure",
+            },
+        )
+        for _ in range(2)
+    )
+    path = tmp_path / "explicit-failure-rate.jsonl"
+    path.write_text(json.dumps(envelope(signal="logs", payload=resource_logs(records))) + "\n", encoding="utf-8")
+    summary = summarize_capture(path)
+    assert summary.tools.calls == 4
+    assert summary.tools.failures == 2
+    assert summary.insights.high_tool_failure_rate == (
+        HighToolFailureRate(
+            tool_name="Bash",
+            failed_calls=2,
+            total_calls=4,
+            failure_rate=FailureRate(numerator=1, denominator=2),
+        ),
+    )
+    text = render_text(summary)
+    payload = render_json(summary)
+    assert "- Bash: 2 failed of 4 calls (1/2)" in text
+    parsed = json.loads(payload)
+    assert parsed["insights"]["high_tool_failure_rate"] == [
+        {
+            "tool_name": "Bash",
+            "failed_calls": 2,
+            "total_calls": 4,
+            "failure_rate": {"numerator": 1, "denominator": 2},
+        }
+    ]
+    for marker in (
+        "Connection timed out to api.example.invalid",
+        "rm -rf /tmp/synthetic-project",
+        "this successful output mentions failure",
+        "ShellError",
+    ):
+        assert marker not in text
+        assert marker not in payload

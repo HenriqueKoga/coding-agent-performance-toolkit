@@ -87,6 +87,7 @@ def summary_to_dict(summary: TraceSummary) -> dict[str, object]:
             "calls": summary.tools.calls,
             "successes": summary.tools.successes,
             "failures": summary.tools.failures,
+            "success_rate_bps": summary.tools.success_rate_bps,
             "input_bytes": summary.tools.input_bytes,
             "result_bytes": summary.tools.result_bytes,
             "duration_ms": {
@@ -159,6 +160,18 @@ def summary_to_dict(summary: TraceSummary) -> dict[str, object]:
                 }
                 for finding in summary.insights.high_tool_result_volume
             ],
+            "high_tool_failure_rate": [
+                {
+                    "tool_name": finding.tool_name,
+                    "failed_calls": finding.failed_calls,
+                    "total_calls": finding.total_calls,
+                    "failure_rate": {
+                        "numerator": finding.failure_rate.numerator,
+                        "denominator": finding.failure_rate.denominator,
+                    },
+                }
+                for finding in summary.insights.high_tool_failure_rate
+            ],
             "dominant_tool": (
                 None
                 if dominant is None
@@ -204,7 +217,9 @@ def render_text(summary: TraceSummary) -> str:
         "",
         "Tools",
         f"  Calls:           {tools.calls}",
-        f"  Success rate:    {_percent(tools.successes, tools.calls)}",
+        f"  Successes:       {tools.successes}",
+        f"  Failures:        {tools.failures}",
+        f"  Success rate:    {_bps_percent(tools.success_rate_bps)}",
         f"  Duration:        {_duration_short(tools.duration_ms)}",
     ]
     if tools.by_name:
@@ -250,6 +265,12 @@ def _percent(successes: int, calls: int) -> str:
     return f"{(successes / calls) * 100:.1f}%"
 
 
+def _bps_percent(bps: int | None) -> str:
+    if bps is None:
+        return "n/a"
+    return f"{bps // 100}.{bps % 100:02d}%"
+
+
 def _duration_line(stats: DurationStats) -> str:
     if not stats.total and stats.average is None:
         return "n/a"
@@ -287,6 +308,16 @@ def _insight_lines(insights: Insights) -> list[str]:
         lines.extend(
             f"- {finding.tool_name}: {finding.result_bytes} result bytes"
             for finding in insights.high_tool_result_volume
+        )
+    if insights.high_tool_failure_rate:
+        lines.append("High tool failure rate")
+        lines.extend(
+            (
+                f"- {finding.tool_name}: {finding.failed_calls} failed of "
+                f"{finding.total_calls} calls "
+                f"({finding.failure_rate.numerator}/{finding.failure_rate.denominator})"
+            )
+            for finding in insights.high_tool_failure_rate
         )
     if insights.dominant_tool is not None:
         finding = insights.dominant_tool

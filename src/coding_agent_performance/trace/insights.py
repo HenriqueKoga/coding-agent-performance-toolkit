@@ -1,7 +1,11 @@
 """Deterministic insight rules over trace summaries."""
 
+from math import gcd
+
 from coding_agent_performance.trace.report import (
     DominantTool,
+    FailureRate,
+    HighToolFailureRate,
     HighToolResultVolume,
     Insights,
     RepeatedFailedToolCall,
@@ -12,6 +16,9 @@ from coding_agent_performance.trace.report import (
 REPEATED_TOOL_CALL_THRESHOLD = 3
 REPEATED_FAILED_TOOL_CALL_THRESHOLD = 3
 HIGH_TOOL_RESULT_VOLUME_THRESHOLD = 128 * 1024
+HIGH_TOOL_FAILURE_RATE_MIN_CALLS = 3
+HIGH_TOOL_FAILURE_RATE_THRESHOLD_NUMERATOR = 1
+HIGH_TOOL_FAILURE_RATE_THRESHOLD_DENOMINATOR = 2
 DOMINANT_TOOL_MIN_TOTAL_CALLS = 10
 DOMINANT_TOOL_SHARE_THRESHOLD_PERCENT = 60
 
@@ -61,6 +68,26 @@ def detect_high_tool_result_volume(tools: ToolStats) -> tuple[HighToolResultVolu
     return tuple(findings)
 
 
+def detect_high_tool_failure_rate(tools: ToolStats) -> tuple[HighToolFailureRate, ...]:
+    """Identify tools whose explicit failure rate meets the floor and threshold.
+
+    Returns findings ordered deterministically by tool name. Rate comparison
+    uses integer cross-multiplication so threshold checks stay exact.
+    """
+    findings = [
+        HighToolFailureRate(
+            tool_name=breakdown.name,
+            failed_calls=breakdown.failures,
+            total_calls=breakdown.calls,
+            failure_rate=_exact_failure_rate(breakdown.failures, breakdown.calls),
+        )
+        for breakdown in tools.by_name
+        if _meets_high_failure_rate(breakdown.calls, breakdown.failures)
+    ]
+    findings.sort(key=lambda f: f.tool_name)
+    return tuple(findings)
+
+
 def detect_dominant_tool(tools: ToolStats) -> DominantTool | None:
     """Identify a tool that accounts for a large share of capture tool calls.
 
@@ -93,5 +120,17 @@ def compute_insights(tools: ToolStats) -> Insights:
         repeated_tool_calls=detect_repeated_tool_calls(tools),
         repeated_failed_tool_calls=detect_repeated_failed_tool_calls(tools),
         high_tool_result_volume=detect_high_tool_result_volume(tools),
+        high_tool_failure_rate=detect_high_tool_failure_rate(tools),
         dominant_tool=detect_dominant_tool(tools),
     )
+
+
+def _meets_high_failure_rate(calls: int, failures: int) -> bool:
+    if calls < HIGH_TOOL_FAILURE_RATE_MIN_CALLS:
+        return False
+    return failures * HIGH_TOOL_FAILURE_RATE_THRESHOLD_DENOMINATOR >= calls * HIGH_TOOL_FAILURE_RATE_THRESHOLD_NUMERATOR
+
+
+def _exact_failure_rate(failed_calls: int, total_calls: int) -> FailureRate:
+    divisor = gcd(failed_calls, total_calls)
+    return FailureRate(numerator=failed_calls // divisor, denominator=total_calls // divisor)
