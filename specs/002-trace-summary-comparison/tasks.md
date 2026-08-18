@@ -17,6 +17,7 @@
 - [x] Missing telemetry is never converted into observed zero
 - [x] Availability state remains provider-neutral and fixed-size
 - [x] Narrow normalization-field presence preservation is explicitly approved
+- [x] `model_requests` without an API-request event is unavailable in v1, not observed zero
 - [x] Same-file inputs reuse one immutable summary snapshot
 - [x] Streaming / bounded memory is preserved
 - [x] Final delivery uses Issue #36 with human-applied risk and `agent:ready`
@@ -24,7 +25,7 @@
 ## Phase 1: Inspect current evidence boundaries
 
 - [ ] T001 Inspect `report.py`, `summary.py`, current accumulators, normalized event/metric models, `providers/claude_code/normalizer.py`, `cli.py`, `rendering.py`, capture path handling, and tests that establish fallback/zero behavior
-- [ ] T002 Identify the exact normalized evidence required to mark each of the eight metric slots available without numeric-value heuristics
+- [ ] T002 Identify the exact normalized evidence required to mark each of the eight metric slots available without numeric-value heuristics, including which metrics have an affirmative signal capable of proving observed zero
 
 ---
 
@@ -33,12 +34,12 @@
 ### Tests
 
 - [ ] T003 Add normalizer tests proving missing/invalid API-request cost, input-token, and output-token fields remain distinguishable from explicit numeric zero without changing existing telemetry mappings
-- [ ] T004 Add request-count availability tests across API-request events, OTEL-metric fallback, and no-usage captures
+- [ ] T004 Add request-count availability tests proving at least one API-request event makes `model_requests` available while zero API-request events leaves it unavailable, including OTEL-metric fallback and no-usage captures
 - [ ] T005 Add independent availability tests for estimated cost, input tokens, and output tokens, including partial API-event attributes and partial OTEL metric series
 - [ ] T006 Add tool calls/failures availability tests for log-backed versus metrics-only captures
 - [ ] T007 Add tool-result-byte tests where one or more counted tool calls lack result-size evidence
 - [ ] T008 Add compaction availability tests for lifecycle/log-backed versus metrics-only captures
-- [ ] T009 Assert observed numeric zero remains available while missing telemetry remains unavailable
+- [ ] T009 For metrics with an affirmative zero-coverage signal, assert observed numeric zero remains available while missing telemetry remains unavailable; explicitly assert that `model_requests` has no observed-zero state in v1
 
 ### Implementation
 
@@ -63,7 +64,7 @@
 
 ### Tests
 
-- [ ] T019 [P] [US1] Add CLI tests for identical, increased, decreased, observed-zero, and mixed-availability metrics
+- [ ] T019 [P] [US1] Add CLI tests for identical, increased, decreased, valid observed-zero cases, zero-request unavailability, and mixed-availability metrics
 - [ ] T020 [P] [US1] Add same-file tests proving one summary snapshot is reused, including an alias/symlink case where portable; the result must not depend on a second read of a concurrently changing capture
 - [ ] T021 [P] [US1] Add CLI error tests for missing/unreadable/invalid inputs, asserting non-zero exit, no traceback, no payloads, and no absolute-path disclosure
 
@@ -93,7 +94,7 @@
 
 ## Phase 6: Documentation and validation
 
-- [ ] T031 [P] Document `capt trace compare`, the exact JSON v1 contract, eight fixed slots, unavailable semantics, and same-file snapshot behavior in product/architecture/public-format docs without duplicating the full feature spec
+- [ ] T031 [P] Document `capt trace compare`, the exact JSON v1 contract, eight fixed slots, unavailable semantics including zero-request behavior, and same-file snapshot behavior in product/architecture/public-format docs without duplicating the full feature spec
 - [ ] T032 [P] Confirm the only provider-adapter change is narrow preservation of presence for already-supported API-request fields; no new provider mapping or provider-specific comparison behavior is introduced
 - [ ] T033 [P] Confirm no existing summary JSON schema/version, insight semantics, or capture contracts changed
 - [ ] T034 [P] Confirm all fixtures/examples are synthetic and comparison output/error messages remain allowlisted
@@ -103,6 +104,7 @@
 
 - Issue #36 is the single operational implementation task after specification approval.
 - Do not infer availability from numeric values.
+- Do not infer observed zero from absence of events; `model_requests` with no API-request event is unavailable in v1.
 - Do not erase normalized field presence into fallback zero when availability depends on it.
 - Do not compare same-file inputs by summarizing the same mutable file twice.
 - Do not deviate from the mandatory comparison JSON v1 layout without a new specification/schema version decision.
