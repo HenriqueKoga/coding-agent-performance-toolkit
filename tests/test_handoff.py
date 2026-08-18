@@ -6,12 +6,12 @@ import pytest
 from typer.testing import CliRunner
 
 from coding_agent_performance.cli import app
+from coding_agent_performance.trace.comparison import compare_summaries
 from coding_agent_performance.trace.handoff import (
     HANDOFF_SCHEMA_VERSION,
     HANDOFF_UNKNOWN_SOURCE,
     handoff_from_summary,
 )
-from coding_agent_performance.trace.comparison import compare_summaries
 from coding_agent_performance.trace.rendering import (
     comparison_to_dict,
     handoff_to_dict,
@@ -24,8 +24,8 @@ from coding_agent_performance.trace.report import (
     ActivityStats,
     CaptureInfo,
     CodeEditDecisionStats,
-    ComparisonAvailability,
     CompactionPressure,
+    ComparisonAvailability,
     CoverageStats,
     DominantTool,
     DurationStats,
@@ -338,7 +338,12 @@ def _activity_metric() -> dict[str, object]:
     return sum_metric("claude_code.commit.count", [number_point(value=0)], temporality=1)
 
 
-def _invoke_handoff(*args: str) -> object:
+def _as_dict(value: object) -> dict[str, object]:
+    assert isinstance(value, dict)
+    return value
+
+
+def _invoke_handoff(*args: str):
     return runner.invoke(app, ["trace", "handoff", *args], color=False)
 
 
@@ -416,10 +421,13 @@ def test_handoff_omits_out_of_allowlist_summary_fields() -> None:
     payload = handoff_to_dict(handoff)
     _assert_handoff_key_order(payload)
     _assert_no_disallowed_keys(payload)
-    assert payload["model_usage"]["tokens"] == {"input": 8000, "output": 2500}
-    assert "cache_read" not in payload["model_usage"]["tokens"]
-    assert payload["tools"]["result_bytes"] == 4096
-    assert "input_bytes" not in payload["tools"]
+    model_usage = _as_dict(payload["model_usage"])
+    tokens = _as_dict(model_usage["tokens"])
+    tools = _as_dict(payload["tools"])
+    assert tokens == {"input": 8000, "output": 2500}
+    assert "cache_read" not in tokens
+    assert tools["result_bytes"] == 4096
+    assert "input_bytes" not in tools
     assert handoff.capture.file == summary.capture.file
     assert not hasattr(handoff.capture, "envelopes")
     assert not hasattr(handoff, "activity")
@@ -437,7 +445,8 @@ def test_success_rate_bps_is_null_when_there_are_no_tool_calls() -> None:
     handoff = handoff_from_summary(_summary(calls=0, successes=0, failures=0))
     assert handoff.tools.calls == 0
     assert handoff.tools.success_rate_bps is None
-    assert handoff_to_dict(handoff)["tools"]["success_rate_bps"] is None
+    tools = _as_dict(handoff_to_dict(handoff)["tools"])
+    assert tools["success_rate_bps"] is None
 
 
 def test_success_rate_bps_matches_summary_when_calls_exist() -> None:
@@ -471,8 +480,9 @@ def test_arbitrary_source_maps_to_unknown_and_does_not_appear() -> None:
     payload = handoff_to_dict(handoff)
     text = render_handoff_text(handoff)
     encoded = render_handoff_json(handoff)
+    capture = _as_dict(payload["capture"])
     assert handoff.capture.source == HANDOFF_UNKNOWN_SOURCE
-    assert payload["capture"]["source"] == "unknown"
+    assert capture["source"] == "unknown"
     assert _ARBITRARY_SOURCE not in text
     assert _ARBITRARY_SOURCE not in encoded
     assert _ARBITRARY_SOURCE not in json.dumps(payload)
@@ -509,9 +519,8 @@ def test_cli_insight_capture_reuses_summarize_wording(tmp_path: Path) -> None:
     )
     result = _invoke_handoff(str(path))
     summary = summary_to_dict(summarize_capture(path))
-    insights = summary["insights"]
+    insights = _as_dict(summary["insights"])
     assert result.exit_code == 0
-    assert isinstance(insights, dict)
     assert insights["repeated_tool_calls"]
     assert "Insights" in result.stdout
     assert "Repeated tool calls" in result.stdout
@@ -604,9 +613,11 @@ def test_json_v1_contract_and_key_order() -> None:
     _assert_handoff_key_order(payload)
     _assert_no_disallowed_keys(payload)
     assert payload["schema_version"] == 1
-    assert payload["tools"]["success_rate_bps"] == 8333
-    assert payload["insights"]["repeated_failed_tool_calls"] == []
-    assert payload["insights"]["subagent_usage"] is None
+    tools = _as_dict(payload["tools"])
+    insights = _as_dict(payload["insights"])
+    assert tools["success_rate_bps"] == 8333
+    assert insights["repeated_failed_tool_calls"] == []
+    assert insights["subagent_usage"] is None
     encoded = render_handoff_json(handoff_from_summary(_insight_summary()))
     assert encoded.index('"schema_version"') < encoded.index('"capture"')
     assert encoded.index('"sessions"') < encoded.index('"model_usage"')
@@ -616,8 +627,8 @@ def test_json_v1_contract_and_key_order() -> None:
 
 def test_json_empty_insights_keep_empty_arrays_and_nulls() -> None:
     payload = handoff_to_dict(handoff_from_summary(_summary()))
-    insights = payload["insights"]
-    assert isinstance(insights, dict)
+    insights = _as_dict(payload["insights"])
+    tools = _as_dict(payload["tools"])
     assert insights["repeated_tool_calls"] == []
     assert insights["repeated_failed_tool_calls"] == []
     assert insights["high_tool_result_volume"] == []
@@ -626,7 +637,7 @@ def test_json_empty_insights_keep_empty_arrays_and_nulls() -> None:
     assert insights["compaction_pressure"] is None
     assert insights["subagent_usage"] is None
     assert "dominant_tool" in insights
-    assert payload["tools"]["success_rate_bps"] is None
+    assert tools["success_rate_bps"] is None
 
 
 def test_json_serialization_is_deterministic(tmp_path: Path) -> None:
