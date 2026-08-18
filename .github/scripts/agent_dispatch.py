@@ -219,7 +219,8 @@ def build_prompt(issue_number: int) -> str:
         "Do not mutate lifecycle or risk labels.\n"
         "Run the repository's required validation.\n"
         f"Open a Draft Pull Request with exactly one standalone `Closes #{issue_number}` line.\n"
-        "Do not mark the PR ready for review until implementation and validation are complete.\n"
+        "Keep the PR as a Draft while implementation or validation is incomplete.\n"
+        "After implementation and required validation are complete, mark that existing Draft PR Ready for Review.\n"
         "Do not merge the PR.\n"
     )
 
