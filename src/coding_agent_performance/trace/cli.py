@@ -138,7 +138,7 @@ def compare(
 
 @trace_app.command(
     "handoff",
-    context_settings={"allow_extra_args": True},
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
 )
 def handoff(
     ctx: typer.Context,

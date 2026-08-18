@@ -515,6 +515,27 @@ def test_handoff_help(visible: Callable[[str], str]) -> None:
     assert " -o " not in f" {text} "
 
 
+def test_explicit_option_like_filename_is_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    write_synthetic_capture(tmp_path / "--odd.jsonl")
+    monkeypatch.chdir(tmp_path)
+
+    text = _invoke_handoff("--odd.jsonl")
+    json_result = _invoke_handoff("--format", "json", "--odd.jsonl")
+
+    assert text.exit_code == 0
+    assert json_result.exit_code == 0
+    assert text.stdout.startswith("Handoff")
+    assert "File:            --odd.jsonl" in text.stdout
+    parsed = json.loads(json_result.stdout)
+    assert parsed["capture"]["file"] == "--odd.jsonl"
+    assert str(tmp_path) not in text.output
+    assert str(tmp_path) not in json_result.output
+    mixed = _invoke_handoff("--odd.jsonl", "--latest")
+    assert mixed.exit_code == 1
+    assert mixed.output.strip() == "Provide either a capture path or --latest, not both."
+    assert "Handoff" not in mixed.stdout
+
+
 def test_cli_minimal_capture_text_and_empty_insights(tmp_path: Path) -> None:
     path = _write_capture(tmp_path / "minimal.jsonl", _metrics(_activity_metric()))
     result = _invoke_handoff(str(path))
