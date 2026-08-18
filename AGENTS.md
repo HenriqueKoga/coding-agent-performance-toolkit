@@ -33,7 +33,7 @@ Do not read the entire repository by default.
 Resolve conflicts in this order:
 
 1. Explicit user or current-task instruction
-2. Issue acceptance criteria
+2. Issue acceptance criteria. After an approved specification exists for that Issue, the merged Spec Kit `spec.md` is authoritative when it conflicts with the original brief.
 3. This file, for operational procedure
 4. [.specify/memory/constitution.md](.specify/memory/constitution.md), for durable principles
 5. Accepted ADRs
@@ -106,6 +106,16 @@ Operational constraints for work in this repository:
 See [docs/development.md](docs/development.md) for setup, commands, and delivery details. See [docs/spec-kit.md](docs/spec-kit.md) for the Spec Agent contract and specification-layer workflow. Spec Kit does not replace this file's validation, Git/PR, or human-approval rules.
 
 When the task is specification authoring, follow that Spec Agent contract: use the repository-pinned Spec Kit integration, write artifacts under `specs/<feature>/`, open a specification-only review PR, and stop. Do not run `/speckit.implement` or `/speckit.taskstoissues`, mutate lifecycle or risk labels, dispatch another agent, merge, or change CAPT runtime code.
+
+Source-of-truth split for Agent Tasks:
+
+- Issue body = original request / feature brief. Do not rewrite it after specification approval.
+- Spec Kit artifacts under `specs/<feature>/` = approved requirements, design, and tasks. When they conflict with the original brief, the merged `spec.md` is authoritative.
+- labels = operational lifecycle state
+- managed Issue comment `<!-- capt-spec-approved:v1 -->` authored by `github-actions[bot]` = Issue ↔ approved-spec index
+- implementation PR = execution, linked with standalone `Closes #<issue>`
+
+If an Issue has no approved-spec comment, do not infer a `specs/` directory from free-form prose. Treat the Issue body as the task specification.
 
 ## Required validation
 

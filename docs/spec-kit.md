@@ -34,7 +34,7 @@ Cursor Cloud Agent
   └─ implementation after human agent:ready
 
 GitHub Actions
-  └─ deterministic validation / lifecycle / dispatch
+  └─ deterministic validation / lifecycle / dispatch / approved-spec index
 
 Codex
   └─ independent review
@@ -92,14 +92,17 @@ persist approved report as specs/<feature>/analyze.md
         ↓
 specification-only review PR
   standalone <!-- capt-lifecycle: ignore -->
-  Related to #N only if an operational Issue already exists
+  capt-spec:v1 metadata for the existing Agent Task Issue and canonical spec.md
+  Related to #N for that same Issue
   no standalone Closes #N
         ↓
 STOP  (Spec Agent handoff)
         ↓
 human review / merge of the specification
         ↓
-manual GitHub Agent Task Issue
+automation upserts one capt-spec-approved:v1 Issue comment
+  Issue body unchanged
+  agent:ready is not applied
         ↓
 human agent:ready
         ↓
@@ -126,8 +129,20 @@ Open one specification-only pull request from the specification branch, not from
 That body must:
 
 - include a standalone `<!-- capt-lifecycle: ignore -->` line
+- include exactly one versioned `capt-spec:v1` metadata block naming the existing Agent Task Issue and canonical `specs/<feature>/spec.md` path
+- include a standalone `Related to #<issue>` line for that same Issue
 - not include a standalone `Closes #<issue>` line
-- include `Related to #<issue>` only when an operational Agent Task Issue already exists
+
+The metadata block is the machine-readable contract. Do not infer the canonical spec directory from free-form PR prose. Duplicate metadata blocks, unsupported versions, missing or invalid issue numbers, invalid paths, conflicting fields, or a `Related to #<issue>` mismatch fail closed.
+
+Example:
+
+```text
+<!-- capt-spec:v1
+issue: 58
+spec: specs/004-persist-handoff-safely/spec.md
+-->
+```
 
 Do not combine the opt-out marker with any `Closes #<issue>` line. The marker is the only lifecycle opt-out, and the value must be exactly `ignore`. Any other standalone `<!-- capt-lifecycle: ... -->` value, an empty value, or a malformed namespace comment fails closed. Opt-out does not skip CI, Codex, branch protection, or other repository checks, and it is not inferred from `docs:` titles, `spec/` branches, changed paths, or draft status.
 
@@ -233,9 +248,13 @@ Do not modify `spec.md`, `plan.md`, or `tasks.md` from the analyze command itsel
 
 ## Bridge to GitHub Issues
 
-The Spec Agent does not create the operational Issue. After the specification review PR is reviewed and merged, a human creates **one** GitHub Issue with the [Agent Task template](../.github/ISSUE_TEMPLATE/agent-task.yml). Copy the goal, acceptance criteria, out of scope, constraints, validation, privacy, compatibility, and human decisions from the Spec Kit artifacts. Keep examples synthetic.
+The Spec Agent does not create the operational Issue and must not create a second implementation Issue for a feature that already has an Agent Task Issue. The Agent Task Issue body remains the original feature brief for the life of the task.
 
-A human later applies exactly one `risk:*` label and, when ready, `agent:ready`. That remains the only dispatch trigger for Cursor Cloud Agent.
+When an operational Issue already exists, the specification review PR must include `capt-spec:v1` metadata and `Related to #<issue>` for that Issue. After that PR is merged to `main`, repository automation validates the canonical artifacts (`spec.md`, `plan.md`, `tasks.md`, `analyze.md`) and creates or updates exactly one managed Issue comment identified by `<!-- capt-spec-approved:v1 -->` and authored by `github-actions[bot]`. Marker-shaped comments from other identities are ignored and are never patched. That comment is an index: specification PR, canonical paths, and the source-of-truth split. It does not copy acceptance criteria, design, or tasks from the Spec Kit artifacts. Reruns update the same comment. The Issue body is not rewritten. `agent:ready` is not applied.
+
+If a specification PR has the lifecycle opt-out marker but no `capt-spec` metadata, automation does not select a `specs/` directory and does not rewrite the Issue. Historical Issues without an approved-spec comment remain valid; implementation dispatch then treats the Issue body as the task specification.
+
+A human later applies exactly one `risk:*` label and, when ready, `agent:ready`. That remains the only dispatch trigger for Cursor Cloud Agent. The implementation prompt includes the original Issue brief plus the approved specification reference when the managed comment exists. The merged `spec.md` is authoritative when it conflicts with the original brief.
 
 ### `taskstoissues` evaluation
 
@@ -255,9 +274,9 @@ Because those gaps cannot be closed without changing the lifecycle, **do not run
 ## What this pilot does not change
 
 - CAPT runtime code, CLI, schemas, persistence, network behavior, and provider adapters
-- GitHub Actions workflows for CI, lifecycle, Cursor dispatch, and Codex rework
 - Lifecycle or risk labels
 - The rule that only a human applies `agent:ready`
+- The specification-PR `<!-- capt-lifecycle: ignore -->` opt-out and implementation `Closes #<issue>` contract
 
 `/speckit.implement` and `/speckit.converge` remain installed because they ship with the Cursor integration. Do not use them as the production implementation path until a later human-approved evaluation.
 
