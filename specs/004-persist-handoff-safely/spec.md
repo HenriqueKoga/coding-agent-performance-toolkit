@@ -8,7 +8,7 @@
 
 **Input**: Add an explicit local file-output option to `capt trace handoff` so the existing compact text or JSON representation can be persisted with safe, deterministic write semantics, while stdout remains the default. Audit and update the user-facing README so it matches the current public CLI, including compare, handoff, and the new file-output behavior.
 
-**Operational Issue**: [#58](https://github.com/HenriqueKoga/coding-agent-performance-toolkit/issues/58) is the GitHub Agent Task that requested this specification. Implementation remains a later human-created Agent Task after this specification is reviewed and merged.
+**Operational Issue**: [#58](https://github.com/HenriqueKoga/coding-agent-performance-toolkit/issues/58) is the existing operational Agent Task. After this specification PR is reviewed and merged, #58 will be reduced to an operational envelope pointing to the approved Spec Kit artifacts. A human may then apply `agent:ready`.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -193,7 +193,7 @@ Plus focused checks covering:
 
 ### Human decisions
 
-- Human approval is required before a later implementation Issue receives `agent:ready`.
+- Human approval is required before Issue #58 receives `agent:ready`. Spec Kit must not apply that label.
 - This specification pins `--output PATH`, `--force` only with `--output`, byte-identical file content, silent stdout on successful file write, refuse-if-exists by default, refuse destination symlinks even with `--force`, no parent-directory creation, sibling temporary file plus atomic replace, POSIX `0600` on the handoff file, and a focused README synchronization.
 - Stop for human review if implementation would require changing handoff JSON v1, implicit persistence or Context Ledger semantics, remote storage or network behavior, a new runtime dependency, a generic artifact/persistence framework, `--latest` or broader capture discovery, changing summarize/compare/handoff contracts beyond these additive options, or README scope beyond current public behavior.
 - Spec Kit must not apply lifecycle or risk labels.

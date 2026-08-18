@@ -4,7 +4,7 @@
 
 **Input**: Feature specification from `/specs/004-persist-handoff-safely/spec.md`
 
-**Note**: Specification-phase plan only. Implementation enters the existing GitHub lifecycle through a later human-created Agent Task Issue after this specification is reviewed; do not run `/speckit.implement`.
+**Note**: Specification-phase plan only. Issue #58 is the existing operational Agent Task. After this specification is reviewed and merged, #58 is reduced to an operational envelope pointing at these artifacts; a human may then apply `agent:ready`. Do not run `/speckit.implement`.
 
 ## Summary
 

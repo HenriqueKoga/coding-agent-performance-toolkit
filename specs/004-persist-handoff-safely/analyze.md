@@ -75,20 +75,20 @@ The design remains local-first: the operator names a local path, and nothing is 
 
 The new module is a concrete handoff writer. It does not become a generic artifact registry, does not extend `CaptureWriter` into a persistence framework, and adds no runtime dependency or LLM.
 
-Human approval remains the gate for a later Agent Task Issue. Spec Kit does not apply `agent:ready` or `risk:*`.
+Human approval remains the gate: after merge, Issue #58 is reduced to an operational envelope pointing at these artifacts, and a human may apply `agent:ready`. Spec Kit does not apply `agent:ready` or `risk:*`.
 
 ## Cross-artifact consistency
 
 - Spec, plan, and contract agree on `--output`, `--force` only with `--output`, byte-identical files, silent stdout on successful file write, refuse destination symlinks, no parent creation, and POSIX `0600`.
 - JSON v1 is explicitly not versioned here; tasks forbid `handoff.py` allowlist changes.
 - README work is bounded to current public Typer commands plus contradiction fixes. Product/architecture/summary-format stdout-only sentences are updated because they would otherwise become false.
-- Issue #58 is recorded as the requesting Agent Task. Implementation is not dispatched from this specification PR.
+- Issue #58 is the existing operational Agent Task. This specification PR does not dispatch implementation, mutate #58, or apply `agent:ready`.
 
 ## Next actions
 
 No CRITICAL or HIGH issues. The specification is ready for a specification-only review PR.
 
-Do not run `/speckit.implement` or `/speckit.taskstoissues`. After human merge, a human creates the implementation Agent Task.
+Do not run `/speckit.implement` or `/speckit.taskstoissues`. After human merge, #58 remains the operational Agent Task and is reduced to an envelope pointing at these artifacts. A human may then apply `agent:ready`.
 
 ## Remediation
 

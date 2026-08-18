@@ -56,4 +56,4 @@ This Phase 0 note records choices the spec already pins. There are no remaining 
 
 ## Unresolved items
 
-None. Human review is still required before a later implementation Issue receives `agent:ready`.
+None. Human review of this specification is still required before Issue #58 is reduced to an operational envelope pointing at these artifacts and receives `agent:ready`.

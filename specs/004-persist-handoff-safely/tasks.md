@@ -10,7 +10,7 @@ description: "Task list for persist compact trace handoff safely"
 
 **Tests**: Required. Synthetic fixtures and temporary directories only.
 
-**Organization**: Build the exclusive file writer first, then stdout-compatible `--output`, then overwrite/symlink safety, then README audit. Implementation stays on a later human-created Agent Task Issue after this specification is reviewed. Do not run `/speckit.implement` or `/speckit.taskstoissues`.
+**Organization**: Build the exclusive file writer first, then stdout-compatible `--output`, then overwrite/symlink safety, then README audit. Implementation remains on existing Issue #58 after this specification is reviewed and merged. Do not run `/speckit.implement` or `/speckit.taskstoissues`.
 
 ## Format: `[ID] [P?] [Story] Description`
 
@@ -145,7 +145,7 @@ MVP is Phase 2 plus User Story 1: explicit `--output` create-if-absent with byte
 
 ## Notes
 
-- Issue #58 requested this specification. A human creates the implementation Agent Task after this specification review PR is merged.
+- Issue #58 is the existing operational Agent Task. After this specification review PR is merged, #58 is reduced to an operational envelope pointing at these artifacts. A human may then apply `agent:ready`.
 - Do not change handoff JSON v1 or the compact allowlist.
 - Do not reuse `CaptureWriter` or `CaptureStorageError`.
 - Do not print absolute paths on success or failure.
