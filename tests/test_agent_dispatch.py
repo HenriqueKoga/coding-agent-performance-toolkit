@@ -210,6 +210,11 @@ def test_closed_issue_does_not_plan_dispatch() -> None:
 def test_prompt_contains_required_contract() -> None:
     issue_number = 18
     prompt = build_prompt(issue_number)
+    draft_at = prompt.index("Open a Draft Pull Request")
+    keep_draft_at = prompt.index("Keep the PR as a Draft while implementation or validation is incomplete.")
+    ready_at = prompt.index(
+        "After implementation and required validation are complete, mark that existing Draft PR Ready for Review."
+    )
     assert f"Issue #{issue_number}" in prompt
     assert OWNER_REPO in prompt
     assert "AGENTS.md" in prompt
@@ -217,11 +222,22 @@ def test_prompt_contains_required_contract() -> None:
     assert "complete task specification" in prompt
     assert "Do not expand scope." in prompt
     assert "Do not mutate lifecycle or risk labels." in prompt
-    assert "Draft Pull Request" in prompt
     assert f"`Closes #{issue_number}`" in prompt
-    assert "Do not mark the PR ready for review" in prompt
     assert "Do not merge the PR." in prompt
+    assert draft_at < keep_draft_at < ready_at
     assert ISSUE_BODY_SECRET not in prompt
+
+
+def test_prompt_requires_draft_first_then_ready_after_validation() -> None:
+    prompt = build_prompt(18)
+    draft_instruction = "Open a Draft Pull Request with exactly one standalone `Closes #18` line."
+    keep_draft = "Keep the PR as a Draft while implementation or validation is incomplete."
+    mark_ready = (
+        "After implementation and required validation are complete, mark that existing Draft PR Ready for Review."
+    )
+    assert prompt.index(draft_instruction) < prompt.index(keep_draft) < prompt.index(mark_ready)
+    assert "CI" not in prompt
+    assert "Do not mark the PR ready for review until" not in prompt
 
 
 def test_agent_id_is_deterministic_and_issue_specific() -> None:
