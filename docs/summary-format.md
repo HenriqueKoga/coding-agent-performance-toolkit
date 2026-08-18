@@ -196,5 +196,18 @@ The field is `null` when there are no sessions or the count is below the
 threshold, including zero compactions. Compaction events without a session
 identity still produce no finding.
 
+`insights.subagent_usage` is a single finding or `null`. A finding is emitted
+when the capture-level `sessions.subagents_completed` count meets or exceeds
+the deterministic threshold (currently 2). This reports observed subagent
+usage only. It does not classify the activity as helpful or wasteful, and it
+does not recommend a next action.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `completed_count` | integer | The observed completed-subagent count |
+
+The field is `null` when the count is below the threshold, including zero
+completed subagents.
+
 Insight findings contain only allowlisted evidence. Tool arguments, results,
 error payloads, prompts, identifiers, and absolute paths are never included.

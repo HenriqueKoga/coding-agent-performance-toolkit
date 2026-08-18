@@ -13,6 +13,7 @@ from coding_agent_performance.trace.report import (
     RepeatedFailedToolCall,
     RepeatedToolCall,
     SessionStats,
+    SubagentUsage,
     ToolBreakdown,
     ToolStats,
 )
@@ -26,6 +27,7 @@ HIGH_TOOL_FAILURE_RATE_THRESHOLD_DENOMINATOR = 2
 DOMINANT_TOOL_MIN_TOTAL_CALLS = 10
 DOMINANT_TOOL_SHARE_THRESHOLD_PERCENT = 60
 COMPACTION_PRESSURE_THRESHOLD = 2
+SUBAGENT_USAGE_THRESHOLD = 2
 _EMPTY_SESSIONS = SessionStats(
     count=0,
     prompts=0,
@@ -132,6 +134,19 @@ def detect_compaction_pressure(sessions: SessionStats) -> CompactionPressure | N
     return CompactionPressure(compaction_count=sessions.compactions)
 
 
+def detect_subagent_usage(sessions: SessionStats) -> SubagentUsage | None:
+    """Identify meaningful subagent usage from the existing session aggregate.
+
+    Emits a finding when `sessions.subagents_completed` meets
+    `SUBAGENT_USAGE_THRESHOLD`. Evidence is the observed completed-subagent
+    count only. The finding reports usage; it does not classify the activity
+    as helpful or wasteful.
+    """
+    if sessions.subagents_completed < SUBAGENT_USAGE_THRESHOLD:
+        return None
+    return SubagentUsage(completed_count=sessions.subagents_completed)
+
+
 @dataclass(frozen=True, slots=True)
 class InsightAnalyzer:
     """Produce deterministic insights from provider-neutral summary evidence."""
@@ -147,6 +162,7 @@ class InsightAnalyzer:
             high_tool_failure_rate=detect_high_tool_failure_rate(self.tools),
             dominant_tool=detect_dominant_tool(self.tools),
             compaction_pressure=detect_compaction_pressure(self.sessions),
+            subagent_usage=detect_subagent_usage(self.sessions),
         )
 
 

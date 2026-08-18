@@ -69,7 +69,7 @@ After the telemetry-summary work, CAPT can:
 - Decode OTLP HTTP/JSON
 - Normalize Claude Code telemetry through an allowlist
 - Print deterministic text and JSON summaries, including capture-level tool execution counts and success rate
-- Detect repeated tool calls, repeated failed tool calls, high cumulative tool result volume, high tool failure rate, dominant tool usage, and compaction pressure from those summaries
+- Detect repeated tool calls, repeated failed tool calls, high cumulative tool result volume, high tool failure rate, dominant tool usage, compaction pressure, and subagent usage from those summaries
 - List eligible local capture files without reading their contents
 
 This version does not score sessions, emit recommendations, compare captures, or call a model.

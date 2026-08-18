@@ -78,6 +78,10 @@ def _compaction_event(event_sequence: int, *, session_id: str | None = "session-
     return NamedLifecycleEvent(name="compaction", session_id=session_id, event_sequence=event_sequence)
 
 
+def _subagent_event(event_sequence: int, *, session_id: str | None = "session-test") -> NamedLifecycleEvent:
+    return NamedLifecycleEvent(name="subagent_completed", session_id=session_id, event_sequence=event_sequence)
+
+
 def _finish_records(*records: ToolExecution | NamedLifecycleEvent, filename: str) -> TraceSummary:
     summarizer = IncrementalSummarizer(filename=filename)
     for record in records:
@@ -168,12 +172,14 @@ def test_json_allowlist_keeps_insight_keys() -> None:
         "high_tool_failure_rate",
         "dominant_tool",
         "compaction_pressure",
+        "subagent_usage",
     }
     assert insights["repeated_failed_tool_calls"] == []
     assert insights["high_tool_result_volume"] == []
     assert insights["high_tool_failure_rate"] == []
     assert insights["dominant_tool"] is None
     assert insights["compaction_pressure"] is None
+    assert insights["subagent_usage"] is None
 
 
 def test_text_usage_source_labels() -> None:
@@ -760,6 +766,7 @@ def test_zero_tool_calls_render_explicit_safe_rate() -> None:
         "high_tool_failure_rate": [],
         "dominant_tool": None,
         "compaction_pressure": None,
+        "subagent_usage": None,
     }
 
 
@@ -828,6 +835,7 @@ def test_mixed_calls_render_exact_counts_and_stable_rate() -> None:
         "high_tool_failure_rate": [],
         "dominant_tool": None,
         "compaction_pressure": None,
+        "subagent_usage": None,
     }
 
 
@@ -1345,6 +1353,7 @@ def test_compaction_pressure_coexists_with_existing_insights() -> None:
         "share_percent": 72,
     }
     assert parsed["insights"]["compaction_pressure"] == {"compaction_count": 2}
+    assert parsed["insights"]["subagent_usage"] is None
 
 
 def test_compaction_pressure_contains_only_safe_evidence() -> None:
@@ -1371,3 +1380,159 @@ def test_compaction_pressure_contains_only_safe_evidence() -> None:
     assert finding is not None
     assert set(finding.keys()) == {"compaction_count"}
     assert isinstance(finding["compaction_count"], int)
+
+
+def test_subagent_usage_appears_in_text() -> None:
+    text = render_text(
+        _finish_records(
+            _subagent_event(1),
+            _subagent_event(2),
+            filename="subagent-insights.jsonl",
+        )
+    )
+    assert "Insights" in text
+    assert "Subagent usage" in text
+    assert "- 2 completed" in text
+
+
+def test_subagent_usage_not_present_when_zero() -> None:
+    summary = _finish_tools(
+        _tool_execution("Read", success=True, event_sequence=1),
+        filename="subagent-zero.jsonl",
+    )
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert "Subagent usage" not in text
+    assert parsed["insights"]["subagent_usage"] is None
+
+
+def test_subagent_usage_not_present_below_threshold() -> None:
+    summary = _finish_records(_subagent_event(1), filename="subagent-below.jsonl")
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert "Subagent usage" not in text
+    assert parsed["insights"]["subagent_usage"] is None
+
+
+def test_subagent_usage_at_threshold_in_json_output() -> None:
+    parsed = json.loads(
+        render_json(
+            _finish_records(
+                _subagent_event(1),
+                _subagent_event(2),
+                filename="subagent-at-threshold.jsonl",
+            )
+        )
+    )
+    assert parsed["insights"]["subagent_usage"] == {"completed_count": 2}
+
+
+def test_subagent_usage_above_threshold_in_json_output() -> None:
+    parsed = json.loads(
+        render_json(
+            _finish_records(
+                _subagent_event(1),
+                _subagent_event(2),
+                _subagent_event(3),
+                filename="subagent-above.jsonl",
+            )
+        )
+    )
+    assert parsed["insights"]["subagent_usage"] == {"completed_count": 3}
+
+
+def test_subagent_usage_text_and_json_are_deterministic() -> None:
+    summary = _finish_records(
+        _subagent_event(1),
+        _subagent_event(2),
+        _subagent_event(3),
+        filename="subagent-deterministic.jsonl",
+    )
+    text = render_text(summary)
+    payload = render_json(summary)
+    assert render_text(summary) == text
+    assert render_json(summary) == payload
+    parsed = json.loads(payload)
+    assert "- 3 completed" in text
+    assert parsed["insights"]["subagent_usage"] == {"completed_count": 3}
+
+
+def test_subagent_usage_coexists_with_existing_insights() -> None:
+    summary = _finish_records(
+        *(_tool_execution("Read", success=True, event_sequence=i, result_size_bytes=24576) for i in range(8)),
+        *(
+            _tool_execution(
+                "Bash",
+                success=False,
+                event_sequence=i + 8,
+                error_type="ShellError",
+                result_size_bytes=0,
+            )
+            for i in range(3)
+        ),
+        _compaction_event(11),
+        _compaction_event(12),
+        _subagent_event(13),
+        _subagent_event(14),
+        filename="subagent-coexist.jsonl",
+    )
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert "- Read: 8 calls" in text
+    assert "- Bash: 3 calls" in text
+    assert "- Bash: 3 failures" in text
+    assert "- Read: 196608 result bytes" in text
+    assert "- Bash: 3 failed of 3 calls (1/1)" in text
+    assert "- Read: 8/11 calls (72%)" in text
+    assert "- 2 compactions" in text
+    assert "- 2 completed" in text
+    assert text.index("Compaction pressure") < text.index("Subagent usage")
+    assert parsed["insights"]["repeated_tool_calls"] == [
+        {"tool_name": "Bash", "call_count": 3},
+        {"tool_name": "Read", "call_count": 8},
+    ]
+    assert parsed["insights"]["repeated_failed_tool_calls"] == [{"tool_name": "Bash", "failure_count": 3}]
+    assert parsed["insights"]["high_tool_result_volume"] == [{"tool_name": "Read", "result_bytes": 196608}]
+    assert parsed["insights"]["high_tool_failure_rate"] == [
+        {
+            "tool_name": "Bash",
+            "failed_calls": 3,
+            "total_calls": 3,
+            "failure_rate": {"numerator": 1, "denominator": 1},
+        }
+    ]
+    assert parsed["insights"]["dominant_tool"] == {
+        "tool_name": "Read",
+        "call_count": 8,
+        "total_calls": 11,
+        "share_percent": 72,
+    }
+    assert parsed["insights"]["compaction_pressure"] == {"compaction_count": 2}
+    assert parsed["insights"]["subagent_usage"] == {"completed_count": 2}
+
+
+def test_subagent_usage_contains_only_safe_evidence() -> None:
+    summary = _finish_records(
+        _subagent_event(1, session_id="secret-session-id"),
+        _subagent_event(2, session_id="secret-session-id"),
+        filename="subagent-privacy.jsonl",
+    )
+    text = render_text(summary)
+    payload = render_json(summary)
+    _assert_markers_absent(
+        text,
+        payload,
+        "secret-session-id",
+        "secret-prompt-id",
+        "/tmp/",
+        "researcher",
+        "should delegate",
+        "wasteful",
+        "helpful",
+        "recommend",
+    )
+    parsed = json.loads(payload)
+    finding = parsed["insights"]["subagent_usage"]
+    assert finding is not None
+    assert set(finding.keys()) == {"completed_count"}
+    assert isinstance(finding["completed_count"], int)
