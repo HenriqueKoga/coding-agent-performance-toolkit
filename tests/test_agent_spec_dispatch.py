@@ -590,6 +590,17 @@ def test_workflow_is_dedicated_manual_and_least_privilege() -> None:
     assert "agent_spec_dispatch.py dispatch" in workflow
     assert 'dispatch --issue "${{ github.event.inputs.issue_number }}"' in workflow
     assert "secrets.CURSOR_API_KEY" in workflow
+    authorize_job, dispatch_job = workflow.split("  dispatch:\n", 1)
+    assert "secrets.CURSOR_API_KEY" not in authorize_job
+    assert "environment: spec-agent-dispatch" not in authorize_job
+    assert "environment: spec-agent-dispatch" in dispatch_job
+    assert "needs: authorize" in dispatch_job
+    assert (
+        "if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)"
+        in dispatch_job
+    )
+    assert "ref: ${{ github.event.repository.default_branch }}" in dispatch_job
+    assert "Spec Agent dispatch only runs from the default branch." in authorize_job
     assert "api.cursor.com" not in workflow
     assert "issues: write" not in workflow
     assert "pull-requests: write" not in workflow
@@ -605,6 +616,11 @@ def test_workflow_is_dedicated_manual_and_least_privilege() -> None:
     assert "CURSOR_API_KEY" not in approved
     assert "CURSOR_API_KEY" not in lifecycle
     assert "CURSOR_API_KEY" not in ci
+    assert "environment: spec-agent-dispatch" not in dispatch
+    assert "environment: spec-agent-dispatch" not in approved
+    assert "environment: spec-agent-dispatch" not in lifecycle
+    assert "environment: spec-agent-dispatch" not in rework
+    assert "environment: spec-agent-dispatch" not in ci
     assert "labeled" in dispatch
     assert "github.event.label.name == 'agent:ready'" in dispatch
     assert "agent_spec.py classify" in approved
