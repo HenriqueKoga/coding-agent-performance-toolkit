@@ -595,10 +595,7 @@ def test_workflow_is_dedicated_manual_and_least_privilege() -> None:
     assert "environment: spec-agent-dispatch" not in authorize_job
     assert "environment: spec-agent-dispatch" in dispatch_job
     assert "needs: authorize" in dispatch_job
-    assert (
-        "if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)"
-        in dispatch_job
-    )
+    assert "if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)" in dispatch_job
     assert "ref: ${{ github.event.repository.default_branch }}" in dispatch_job
     assert "Spec Agent dispatch only runs from the default branch." in authorize_job
     assert "api.cursor.com" not in workflow
