@@ -126,8 +126,7 @@ class HandoffOutputError(Exception):
     """Expected failure while persisting a handoff file."""
 
 
-def write_handoff_file(path: Path, content: str, *, overwrite: bool) -> None:
-    ...
+def write_handoff_file(path: Path, content: str, *, overwrite: bool) -> None: ...
 ```
 
 Behavior:
