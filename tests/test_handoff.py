@@ -353,6 +353,12 @@ def _invoke_handoff(*args: str):
     return runner.invoke(app, ["trace", "handoff", *args], color=False)
 
 
+def _seed_capture(directory: Path, name: str, mtime_ns: int) -> Path:
+    path = write_synthetic_capture(directory / name)
+    os.utime(path, ns=(mtime_ns, mtime_ns))
+    return path
+
+
 def _assert_payload_free(output: str, path: Path, *markers: str) -> None:
     assert "Traceback" not in output
     assert str(path.resolve()) not in output
@@ -504,8 +510,30 @@ def test_handoff_help(visible: Callable[[str], str]) -> None:
     assert "text" in text
     assert "--output" in text
     assert "--force" in text
-    assert "--latest" not in text
+    assert "--latest" in text
+    assert "newest capture" in text.lower()
     assert " -o " not in f" {text} "
+
+
+def test_explicit_option_like_filename_is_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    write_synthetic_capture(tmp_path / "--odd.jsonl")
+    monkeypatch.chdir(tmp_path)
+
+    text = _invoke_handoff("--odd.jsonl")
+    json_result = _invoke_handoff("--format", "json", "--odd.jsonl")
+
+    assert text.exit_code == 0
+    assert json_result.exit_code == 0
+    assert text.stdout.startswith("Handoff")
+    assert "File:            --odd.jsonl" in text.stdout
+    parsed = json.loads(json_result.stdout)
+    assert parsed["capture"]["file"] == "--odd.jsonl"
+    assert str(tmp_path) not in text.output
+    assert str(tmp_path) not in json_result.output
+    mixed = _invoke_handoff("--odd.jsonl", "--latest")
+    assert mixed.exit_code == 1
+    assert mixed.output.strip() == "Provide either a capture path or --latest, not both."
+    assert "Handoff" not in mixed.stdout
 
 
 def test_cli_minimal_capture_text_and_empty_insights(tmp_path: Path) -> None:
@@ -540,7 +568,9 @@ def test_cli_insight_capture_reuses_summarize_wording(tmp_path: Path) -> None:
 
 def test_cli_errors_are_payload_free(tmp_path: Path) -> None:
     missing_arg = _invoke_handoff()
-    assert missing_arg.exit_code != 0
+    assert missing_arg.exit_code == 1
+    assert missing_arg.output.strip() == "Provide a capture path or --latest."
+    assert "Handoff" not in missing_arg.stdout
     assert "Traceback" not in missing_arg.output
 
     missing = tmp_path / "missing.jsonl"
@@ -565,15 +595,11 @@ def test_cli_errors_are_payload_free(tmp_path: Path) -> None:
     extra = write_synthetic_capture(tmp_path / "extra.jsonl")
     other = tmp_path / "other.jsonl"
     extra_result = _invoke_handoff(str(extra), str(other))
-    assert extra_result.exit_code != 0
-    assert "exactly one capture path" in extra_result.output
+    assert extra_result.exit_code == 1
+    assert extra_result.output.strip() == "Provide exactly one capture path."
+    assert "Handoff" not in extra_result.stdout
     _assert_payload_free(extra_result.output, extra)
     assert str(other.resolve()) not in extra_result.output
-
-    latest_result = _invoke_handoff("--latest")
-    assert latest_result.exit_code != 0
-    assert "Traceback" not in latest_result.output
-    assert "--latest" not in latest_result.stdout
 
     schema_row = envelope(signal="logs", payload=resource_logs([]))
     schema_row["schema_version"] = _SCHEMA_VERSION_MARKER
@@ -1000,3 +1026,267 @@ def test_cli_file_output_onto_capture_requires_force(tmp_path: Path) -> None:
     forced = _invoke_handoff(str(path), "--output", str(path), "--force")
     assert forced.exit_code == 0
     assert path.read_text(encoding="utf-8") == stdout.stdout
+
+
+def test_latest_text_matches_explicit_newest_capture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _seed_capture(tmp_path, "older.jsonl", 1_000)
+    newest = _seed_capture(tmp_path, "newest.jsonl", 2_000)
+    monkeypatch.setattr("coding_agent_performance.trace.cli.default_captures_dir", lambda: tmp_path)
+
+    latest = _invoke_handoff("--latest")
+    explicit = _invoke_handoff(str(newest))
+
+    assert latest.exit_code == 0
+    assert explicit.exit_code == 0
+    assert latest.stdout == explicit.stdout
+    assert latest.stdout.startswith("Handoff")
+    assert "newest.jsonl" in latest.stdout
+    assert "older.jsonl" not in latest.stdout
+    assert str(newest.resolve()) not in latest.stdout
+    assert str(tmp_path) not in latest.stdout
+    assert str(tmp_path) not in latest.output
+
+
+def test_latest_json_matches_explicit_newest_capture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _seed_capture(tmp_path, "older.jsonl", 1_000)
+    newest = _seed_capture(tmp_path, "newest.jsonl", 2_000)
+    monkeypatch.setattr("coding_agent_performance.trace.cli.default_captures_dir", lambda: tmp_path)
+
+    latest = _invoke_handoff("--latest", "--format", "json")
+    explicit = _invoke_handoff(str(newest), "--format", "json")
+
+    assert latest.exit_code == 0
+    assert explicit.exit_code == 0
+    assert latest.stdout == explicit.stdout
+    parsed = json.loads(latest.stdout)
+    _assert_handoff_key_order(parsed)
+    _assert_no_disallowed_keys(parsed)
+    assert parsed["schema_version"] == 1
+    assert parsed["capture"]["file"] == "newest.jsonl"
+    assert not latest.stderr
+    assert latest.stdout.startswith("{")
+    assert latest.stdout.endswith("}\n")
+    assert str(newest.resolve()) not in latest.stdout
+    assert str(tmp_path) not in latest.output
+    for marker in SENSITIVE_MARKERS:
+        assert marker not in latest.stdout
+
+
+def test_latest_output_file_bytes_match_stdout_and_force_overwrite(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    newest = _seed_capture(tmp_path, "newest.jsonl", 2_000)
+    _seed_capture(tmp_path, "older.jsonl", 1_000)
+    monkeypatch.setattr("coding_agent_performance.trace.cli.default_captures_dir", lambda: tmp_path)
+    dest = tmp_path / "handoff.txt"
+    json_dest = tmp_path / "handoff.json"
+
+    stdout = _invoke_handoff("--latest")
+    written = _invoke_handoff("--latest", "--output", str(dest))
+    json_stdout = _invoke_handoff("--latest", "--format", "json")
+    json_written = _invoke_handoff("--latest", "--format", "json", "--output", str(json_dest))
+    explicit_written = _invoke_handoff(str(newest), "--output", str(tmp_path / "explicit.txt"))
+
+    assert stdout.exit_code == 0
+    assert written.exit_code == 0
+    assert json_stdout.exit_code == 0
+    assert json_written.exit_code == 0
+    assert explicit_written.exit_code == 0
+    assert written.stdout == ""
+    assert json_written.stdout == ""
+    assert dest.read_text(encoding="utf-8") == stdout.stdout
+    assert json_dest.read_text(encoding="utf-8") == json_stdout.stdout
+    assert dest.read_text(encoding="utf-8") == (tmp_path / "explicit.txt").read_text(encoding="utf-8")
+    assert str(tmp_path) not in written.output
+    _assert_no_handoff_temps(tmp_path)
+
+    dest.write_text("keep\n", encoding="utf-8")
+    forced = _invoke_handoff("--latest", "--output", str(dest), "--force")
+    assert forced.exit_code == 0
+    assert forced.stdout == ""
+    assert dest.read_text(encoding="utf-8") == stdout.stdout
+    _assert_no_handoff_temps(tmp_path)
+
+    if hasattr(os, "symlink"):
+        target = tmp_path / "target.txt"
+        target.write_text("keep\n", encoding="utf-8")
+        link = tmp_path / "link.txt"
+        try:
+            link.symlink_to(target)
+        except OSError:
+            link = None
+        if link is not None:
+            link_result = _invoke_handoff("--latest", "--output", str(link), "--force")
+            assert link_result.exit_code == 1
+            assert "path is a symbolic link" in link_result.output
+            assert link.is_symlink()
+            assert target.read_text(encoding="utf-8") == "keep\n"
+            assert str(link.resolve()) not in link_result.output
+            assert "Handoff" not in link_result.stdout
+
+    directory = tmp_path / "outdir"
+    directory.mkdir()
+    dir_result = _invoke_handoff("--latest", "--output", str(directory), "--force")
+    assert dir_result.exit_code == 1
+    assert "path is a directory" in dir_result.output
+    assert directory.is_dir()
+    assert str(directory.resolve()) not in dir_result.output
+    assert "Handoff" not in dir_result.stdout
+
+
+def test_latest_without_output_creates_no_handoff_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _seed_capture(tmp_path, "newest.jsonl", 2_000)
+    monkeypatch.setattr("coding_agent_performance.trace.cli.default_captures_dir", lambda: tmp_path)
+    before = {entry.name for entry in tmp_path.iterdir()}
+    result = _invoke_handoff("--latest")
+    after = {entry.name for entry in tmp_path.iterdir()}
+    assert result.exit_code == 0
+    assert result.stdout.startswith("Handoff")
+    assert after == before
+
+
+def test_path_and_latest_are_mutually_exclusive(tmp_path: Path) -> None:
+    path = write_synthetic_capture(tmp_path / "capture.jsonl")
+    result = _invoke_handoff(str(path), "--latest")
+    assert result.exit_code == 1
+    assert result.output.strip() == "Provide either a capture path or --latest, not both."
+    assert "Handoff" not in result.stdout
+    assert "Traceback" not in result.output
+    assert str(path.resolve()) not in result.output
+
+
+def test_latest_force_without_output_is_rejected(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _seed_capture(tmp_path, "newest.jsonl", 2_000)
+    monkeypatch.setattr("coding_agent_performance.trace.cli.default_captures_dir", lambda: tmp_path)
+    result = _invoke_handoff("--latest", "--force")
+    assert result.exit_code == 1
+    assert result.output.strip() == "Provide --output with --force."
+    assert "Handoff" not in result.stdout
+    assert "Traceback" not in result.output
+    assert str(tmp_path) not in result.output
+
+
+def test_latest_missing_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    missing = tmp_path / "captures"
+    monkeypatch.setattr("coding_agent_performance.trace.cli.default_captures_dir", lambda: missing)
+    result = _invoke_handoff("--latest")
+    assert result.exit_code == 1
+    assert result.output.strip() == "Default capture directory does not exist."
+    assert "Handoff" not in result.stdout
+    assert "Traceback" not in result.output
+    assert str(missing) not in result.output
+
+
+def test_latest_non_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    path = tmp_path / "not-a-dir"
+    path.write_text("payload-should-not-leak\n", encoding="utf-8")
+    monkeypatch.setattr("coding_agent_performance.trace.cli.default_captures_dir", lambda: path)
+    result = _invoke_handoff("--latest")
+    assert result.exit_code == 1
+    assert result.output.strip() == "Default capture path is not a directory."
+    assert "payload-should-not-leak" not in result.output
+    assert str(path) not in result.output
+    assert "Handoff" not in result.stdout
+    assert "Traceback" not in result.output
+
+
+def test_latest_empty_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("coding_agent_performance.trace.cli.default_captures_dir", lambda: tmp_path)
+    result = _invoke_handoff("--latest")
+    assert result.exit_code == 1
+    assert result.output.strip() == "No capture files found in the default capture directory."
+    assert "Handoff" not in result.stdout
+    assert "Traceback" not in result.output
+    assert str(tmp_path) not in result.output
+
+
+def test_latest_directory_oserror(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("coding_agent_performance.trace.cli.default_captures_dir", lambda: tmp_path)
+
+    def fail_scandir(_path: Path) -> object:
+        raise OSError("permission denied")
+
+    monkeypatch.setattr("coding_agent_performance.trace.storage.os.scandir", fail_scandir)
+    result = _invoke_handoff("--latest")
+    assert result.exit_code == 1
+    assert result.output.strip() == "Could not read default capture directory: permission denied"
+    assert "Handoff" not in result.stdout
+    assert "Traceback" not in result.output
+    assert str(tmp_path) not in result.output
+
+
+def test_latest_agrees_with_summarize_for_mtime_tie_break_and_symlink(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("coding_agent_performance.trace.cli.default_captures_dir", lambda: tmp_path)
+
+    _seed_capture(tmp_path, "older.jsonl", 1_000)
+    newest = _seed_capture(tmp_path, "newest.jsonl", 2_000)
+    newest_handoff = _invoke_handoff("--latest", "--format", "json")
+    newest_summarize = runner.invoke(app, ["trace", "summarize", "--latest", "--format", "json"], color=False)
+    assert newest_handoff.exit_code == 0
+    assert newest_summarize.exit_code == 0
+    assert json.loads(newest_handoff.stdout)["capture"]["file"] == newest.name
+    assert json.loads(newest_summarize.stdout)["capture"]["file"] == newest.name
+
+    tied = tmp_path / "tied"
+    tied.mkdir()
+    monkeypatch.setattr("coding_agent_performance.trace.cli.default_captures_dir", lambda: tied)
+    _seed_capture(tied, "alpha.jsonl", 5_000)
+    _seed_capture(tied, "zeta.jsonl", 5_000)
+    tied_handoff = _invoke_handoff("--latest", "--format", "json")
+    tied_summarize = runner.invoke(app, ["trace", "summarize", "--latest", "--format", "json"], color=False)
+    assert tied_handoff.exit_code == 0
+    assert tied_summarize.exit_code == 0
+    assert json.loads(tied_handoff.stdout)["capture"]["file"] == "zeta.jsonl"
+    assert json.loads(tied_summarize.stdout)["capture"]["file"] == "zeta.jsonl"
+
+    if not hasattr(os, "symlink"):
+        return
+    linked = tmp_path / "linked"
+    linked.mkdir()
+    real = _seed_capture(linked, "real.jsonl", 1_000)
+    link = linked / "link.jsonl"
+    try:
+        link.symlink_to(real)
+    except OSError:
+        return
+    os.utime(link, ns=(2_000, 2_000), follow_symlinks=False)
+    monkeypatch.setattr("coding_agent_performance.trace.cli.default_captures_dir", lambda: linked)
+    link_handoff = _invoke_handoff("--latest", "--format", "json")
+    link_summarize = runner.invoke(app, ["trace", "summarize", "--latest", "--format", "json"], color=False)
+    assert link_handoff.exit_code == 0
+    assert link_summarize.exit_code == 0
+    assert json.loads(link_handoff.stdout)["capture"]["file"] == "real.jsonl"
+    assert json.loads(link_summarize.stdout)["capture"]["file"] == "real.jsonl"
+    assert "link.jsonl" not in link_handoff.stdout
+
+
+def test_latest_omits_sensitive_markers_and_compare_rejects_latest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    newest = _seed_capture(tmp_path, "newest.jsonl", 2_000)
+    monkeypatch.setattr("coding_agent_performance.trace.cli.default_captures_dir", lambda: tmp_path)
+    dest = tmp_path / "handoff.json"
+    text = _invoke_handoff("--latest")
+    json_result = _invoke_handoff("--latest", "--format", "json")
+    written = _invoke_handoff("--latest", "--format", "json", "--output", str(dest))
+    missing = _invoke_handoff("--latest", "--force")
+    assert text.exit_code == 0
+    assert json_result.exit_code == 0
+    assert written.exit_code == 0
+    assert missing.exit_code == 1
+    body = dest.read_text(encoding="utf-8")
+    for output in (text.stdout, json_result.stdout, written.output, missing.output, body):
+        assert str(newest.resolve()) not in output
+        assert str(tmp_path) not in output
+        assert str(dest.resolve()) not in output
+        for marker in SENSITIVE_MARKERS:
+            assert marker not in output
+        _assert_no_narrative(output)
+    compare = runner.invoke(app, ["trace", "compare", "--latest"], color=False)
+    assert compare.exit_code != 0
+    assert "Handoff" not in compare.stdout
+    help_result = runner.invoke(app, ["trace", "compare", "--help"], color=False)
+    assert help_result.exit_code == 0
+    assert "--latest" not in help_result.output

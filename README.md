@@ -56,6 +56,7 @@ uv run capt trace summarize path/to/capture.jsonl
 uv run capt trace summarize --latest
 uv run capt trace compare path/to/baseline.jsonl path/to/candidate.jsonl
 uv run capt trace handoff path/to/capture.jsonl
+uv run capt trace handoff --latest
 ```
 
 `capt doctor` checks essential tools (Python 3.14+ and Git) and optional coding-agent CLIs (Claude Code and Codex). Missing optional tools produce warnings and do not fail the command. Cursor is not checked yet because it does not expose a stable CLI for this diagnosis.
@@ -158,12 +159,14 @@ See [docs/summary-format.md](docs/summary-format.md) for the comparison JSON con
 
 ## Export a compact handoff
 
-`capt trace handoff` copies a compact allowlist from one explicit local capture into an agent-readable extract. Provide exactly one path. `--latest` is not supported. `--format text` is the default. `--format json` is the canonical structured form. Stdout is the default. `--output PATH` writes the same representation to a local file and prints no handoff body on success. Existing regular files are refused unless `--force` is also provided. Symbolic links, directories, and other non-regular destinations are refused even with `--force`. Missing parent directories are not created.
+`capt trace handoff` copies a compact allowlist from one local capture into an agent-readable extract. Provide either `--latest` or an explicit path, not both. `--latest` selects the newest eligible `.jsonl` file in the default capture directory, matching `capt trace summarize --latest`. `--format text` is the default. `--format json` is the canonical structured form. Stdout is the default. `--output PATH` writes the same representation to a local file and prints no handoff body on success. Existing regular files are refused unless `--force` is also provided. Symbolic links, directories, and other non-regular destinations are refused even with `--force`. Missing parent directories are not created.
 
 ```bash
 uv run capt trace handoff path/to/capture.jsonl
+uv run capt trace handoff --latest
+uv run capt trace handoff --latest --format json
 uv run capt trace handoff path/to/capture.jsonl --format json
-uv run capt trace handoff path/to/capture.jsonl --output handoff.json
+uv run capt trace handoff --latest --output handoff.json
 uv run capt trace handoff path/to/capture.jsonl --format json --output handoff.json --force
 ```
 

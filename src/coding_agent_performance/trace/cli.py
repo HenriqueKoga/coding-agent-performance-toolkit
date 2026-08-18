@@ -99,7 +99,7 @@ def summarize(
     ] = OutputFormat.TEXT,
 ) -> None:
     """Summarize a local CAPT capture without sending data anywhere."""
-    selected = resolve_summarize_capture(capture, latest=latest)
+    selected = resolve_capture_selection(capture, latest=latest)
     summary = summarize_or_fail(selected)
     if output_format is OutputFormat.JSON:
         sys.stdout.write(render_json(summary))
@@ -143,9 +143,13 @@ def compare(
 def handoff(
     ctx: typer.Context,
     capture: Annotated[
-        Path,
+        Path | None,
         typer.Argument(help="CAPT JSONL capture file."),
-    ],
+    ] = None,
+    latest: Annotated[
+        bool,
+        typer.Option("--latest", help="Handoff the newest capture in the default capture directory."),
+    ] = False,
     output_format: Annotated[
         OutputFormat,
         typer.Option("--format", help="Handoff output format."),
@@ -166,7 +170,8 @@ def handoff(
     if force and output is None:
         typer.echo("Provide --output with --force.", err=True)
         raise typer.Exit(1) from None
-    summary = handoff_capture_or_fail(capture)
+    selected = resolve_capture_selection(capture, latest=latest)
+    summary = handoff_capture_or_fail(selected)
     artifact = handoff_from_summary(summary)
     if output_format is OutputFormat.JSON:
         content = f"{render_handoff_json(artifact)}\n"
@@ -223,7 +228,7 @@ def same_capture_file(left: Path, right: Path) -> bool:
         return False
 
 
-def resolve_summarize_capture(capture: Path | None, *, latest: bool) -> Path:
+def resolve_capture_selection(capture: Path | None, *, latest: bool) -> Path:
     if capture is not None and latest:
         typer.echo("Provide either a capture path or --latest, not both.", err=True)
         raise typer.Exit(1) from None
