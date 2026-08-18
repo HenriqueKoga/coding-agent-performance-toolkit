@@ -65,17 +65,16 @@ class IncrementalSummarizer:
         if not self._coverage.has_recognized_telemetry():
             raise CaptureError(path, "no recognized telemetry")
         tools = self._tools.snapshot()
+        sessions = self._sessions.snapshot(metric_session_count=int(self._metrics.total("claude_code.session.count")))
         return TraceSummary(
             schema_version=SUMMARY_SCHEMA_VERSION,
             capture=self._capture.snapshot(),
-            sessions=self._sessions.snapshot(
-                metric_session_count=int(self._metrics.total("claude_code.session.count"))
-            ),
+            sessions=sessions,
             model_usage=self._usage.snapshot(self._metrics),
             tools=tools,
             activity=self._metrics.activity_stats(),
             coverage=self._coverage.snapshot(),
-            insights=InsightAnalyzer(tools=tools).analyze(),
+            insights=InsightAnalyzer(tools=tools, sessions=sessions).analyze(),
         )
 
     def _ingest(self, record: DomainRecord) -> None:

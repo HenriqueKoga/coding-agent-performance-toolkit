@@ -200,12 +200,18 @@ class DominantTool:
 
 
 @dataclass(frozen=True, slots=True)
+class CompactionPressure:
+    compaction_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class Insights:
     repeated_tool_calls: tuple[RepeatedToolCall, ...]
     repeated_failed_tool_calls: tuple[RepeatedFailedToolCall, ...]
     high_tool_result_volume: tuple[HighToolResultVolume, ...]
     high_tool_failure_rate: tuple[HighToolFailureRate, ...]
     dominant_tool: DominantTool | None
+    compaction_pressure: CompactionPressure | None
 
 
 @dataclass(frozen=True, slots=True)

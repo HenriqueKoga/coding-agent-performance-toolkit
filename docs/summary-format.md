@@ -182,5 +182,18 @@ maximum call count, the lexicographically first tool name is selected.
 The field is `null` when the sample is below 10 calls or the top tool is below
 the 60% threshold.
 
+`insights.compaction_pressure` is a single finding or `null`. A finding is
+emitted when the capture-level `sessions.compactions` count meets or exceeds
+the deterministic threshold (currently 2). This reports observed compaction
+pressure only. It does not infer root cause, quality degradation, or a next
+action.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `compaction_count` | integer | The observed session compaction count |
+
+The field is `null` when the count is below the threshold, including zero
+sessions or zero compactions.
+
 Insight findings contain only allowlisted evidence. Tool arguments, results,
 error payloads, prompts, identifiers, and absolute paths are never included.
