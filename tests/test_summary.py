@@ -11,6 +11,7 @@ from coding_agent_performance.trace.report import (
     FailureRate,
     HighToolFailureRate,
     RepeatedFailedToolCall,
+    SubagentUsage,
     tool_success_rate_bps,
 )
 from coding_agent_performance.trace.summary import summarize_capture
@@ -493,3 +494,82 @@ def test_compaction_pressure_absent_without_session_identifiers(tmp_path: Path) 
     parsed = json.loads(render_json(summary))
     assert "Compaction pressure" not in text
     assert parsed["insights"]["compaction_pressure"] is None
+
+
+def _subagent_records(count: int, *, session_id: str | None = "session-test") -> list[dict[str, object]]:
+    records: list[dict[str, object]] = []
+    for index in range(count):
+        attributes: dict[str, object] = {"event.sequence": index + 1}
+        if session_id is not None:
+            attributes["session.id"] = session_id
+        records.append(log_record(event_name="subagent_completed", attributes=attributes))
+    return records
+
+
+def test_subagent_usage_absent_below_threshold(tmp_path: Path) -> None:
+    path = tmp_path / "subagent-below.jsonl"
+    path.write_text(
+        json.dumps(envelope(signal="logs", payload=resource_logs(_subagent_records(1)))) + "\n",
+        encoding="utf-8",
+    )
+    summary = summarize_capture(path)
+    assert summary.sessions.subagents_completed == 1
+    assert summary.insights.subagent_usage is None
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert "Subagent usage" not in text
+    assert parsed["insights"]["subagent_usage"] is None
+
+
+def test_subagent_usage_present_at_threshold(tmp_path: Path) -> None:
+    path = tmp_path / "subagent-at.jsonl"
+    path.write_text(
+        json.dumps(envelope(signal="logs", payload=resource_logs(_subagent_records(2)))) + "\n",
+        encoding="utf-8",
+    )
+    summary = summarize_capture(path)
+    assert summary.sessions.subagents_completed == 2
+    assert summary.insights.subagent_usage == SubagentUsage(completed_count=2)
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert "- 2 completed" in text
+    assert parsed["insights"]["subagent_usage"] == {"completed_count": 2}
+
+
+def test_subagent_usage_present_above_threshold(tmp_path: Path) -> None:
+    path = tmp_path / "subagent-above.jsonl"
+    path.write_text(
+        json.dumps(envelope(signal="logs", payload=resource_logs(_subagent_records(4)))) + "\n",
+        encoding="utf-8",
+    )
+    summary = summarize_capture(path)
+    assert summary.sessions.subagents_completed == 4
+    assert summary.insights.subagent_usage == SubagentUsage(completed_count=4)
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert "- 4 completed" in text
+    assert parsed["insights"]["subagent_usage"] == {"completed_count": 4}
+
+
+def test_subagent_usage_omits_identifiers_and_payloads(tmp_path: Path) -> None:
+    records = [
+        log_record(
+            event_name="subagent_completed",
+            attributes={
+                "session.id": "secret-session-id",
+                "event.sequence": index + 1,
+                "prompt.id": "secret-prompt-id",
+            },
+        )
+        for index in range(2)
+    ]
+    path = tmp_path / "subagent-privacy.jsonl"
+    path.write_text(json.dumps(envelope(signal="logs", payload=resource_logs(records))) + "\n", encoding="utf-8")
+    summary = summarize_capture(path)
+    text = render_text(summary)
+    payload = render_json(summary)
+    for marker in ("secret-session-id", "secret-prompt-id", "/tmp/", "recommend", "wasteful"):
+        assert marker not in text
+        assert marker not in payload
+    parsed = json.loads(payload)
+    assert parsed["insights"]["subagent_usage"] == {"completed_count": 2}

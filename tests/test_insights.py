@@ -5,6 +5,7 @@ from coding_agent_performance.trace.insights import (
     DOMINANT_TOOL_MIN_TOTAL_CALLS,
     DOMINANT_TOOL_SHARE_THRESHOLD_PERCENT,
     HIGH_TOOL_RESULT_VOLUME_THRESHOLD,
+    SUBAGENT_USAGE_THRESHOLD,
     InsightAnalyzer,
     compute_insights,
     detect_compaction_pressure,
@@ -13,6 +14,7 @@ from coding_agent_performance.trace.insights import (
     detect_high_tool_result_volume,
     detect_repeated_failed_tool_calls,
     detect_repeated_tool_calls,
+    detect_subagent_usage,
 )
 from coding_agent_performance.trace.report import (
     CompactionPressure,
@@ -25,6 +27,7 @@ from coding_agent_performance.trace.report import (
     RepeatedFailedToolCall,
     RepeatedToolCall,
     SessionStats,
+    SubagentUsage,
     ToolBreakdown,
     ToolStats,
 )
@@ -82,13 +85,13 @@ def _tools(*rows: ToolBreakdown) -> ToolStats:
     )
 
 
-def _sessions(*, compactions: int = 0, count: int = 0) -> SessionStats:
+def _sessions(*, compactions: int = 0, subagents_completed: int = 0, count: int = 0) -> SessionStats:
     return SessionStats(
         count=count,
         prompts=0,
         assistant_responses=0,
         compactions=compactions,
-        subagents_completed=0,
+        subagents_completed=subagents_completed,
     )
 
 
@@ -168,6 +171,7 @@ def test_compute_insights() -> None:
     assert insights.high_tool_failure_rate == ()
     assert insights.dominant_tool is None
     assert insights.compaction_pressure is None
+    assert insights.subagent_usage is None
 
 
 def test_repeated_tool_call_contains_only_safe_evidence() -> None:
@@ -254,6 +258,7 @@ def test_compute_insights_keeps_repeated_calls_independent_of_failures() -> None
     assert insights.high_tool_failure_rate == ()
     assert insights.dominant_tool is None
     assert insights.compaction_pressure is None
+    assert insights.subagent_usage is None
 
 
 def test_repeated_failed_tool_call_contains_only_safe_evidence() -> None:
@@ -338,6 +343,7 @@ def test_compute_insights_keeps_existing_rules_independent_of_result_volume() ->
     assert insights.high_tool_failure_rate == ()
     assert insights.dominant_tool is None
     assert insights.compaction_pressure is None
+    assert insights.subagent_usage is None
 
 
 def test_high_tool_result_volume_contains_only_safe_evidence() -> None:
@@ -458,6 +464,7 @@ def test_compute_insights_keeps_existing_rules_independent_of_failure_rate() -> 
     assert insights.high_tool_failure_rate == (_failure_rate_finding("Bash", failed_calls=4, total_calls=6),)
     assert insights.dominant_tool is None
     assert insights.compaction_pressure is None
+    assert insights.subagent_usage is None
 
 
 def test_high_tool_failure_rate_contains_only_safe_evidence() -> None:
@@ -587,6 +594,7 @@ def test_compute_insights_keeps_existing_rules_independent_of_dominant_tool() ->
         share_percent=72,
     )
     assert insights.compaction_pressure is None
+    assert insights.subagent_usage is None
 
 
 def test_dominant_tool_contains_only_safe_evidence() -> None:
@@ -631,6 +639,7 @@ def test_detect_compaction_pressure_emits_at_most_one_finding() -> None:
     assert findings == CompactionPressure(compaction_count=4)
     insights = compute_insights(_tools(), sessions)
     assert insights.compaction_pressure == findings
+    assert insights.subagent_usage is None
 
 
 def test_compute_insights_keeps_existing_rules_independent_of_compaction_pressure() -> None:
@@ -655,7 +664,63 @@ def test_compute_insights_keeps_existing_rules_independent_of_compaction_pressur
         share_percent=72,
     )
     assert insights.compaction_pressure == CompactionPressure(compaction_count=3)
+    assert insights.subagent_usage is None
 
 
 def test_compaction_pressure_contains_only_safe_evidence() -> None:
     _assert_safe_finding(CompactionPressure(compaction_count=2), "compaction_count")
+
+
+def test_detect_subagent_usage_zero_completed() -> None:
+    assert detect_subagent_usage(_sessions(subagents_completed=0)) is None
+
+
+def test_detect_subagent_usage_below_threshold() -> None:
+    assert detect_subagent_usage(_sessions(subagents_completed=SUBAGENT_USAGE_THRESHOLD - 1)) is None
+
+
+def test_detect_subagent_usage_at_threshold() -> None:
+    findings = detect_subagent_usage(_sessions(subagents_completed=SUBAGENT_USAGE_THRESHOLD))
+    assert findings == SubagentUsage(completed_count=SUBAGENT_USAGE_THRESHOLD)
+
+
+def test_detect_subagent_usage_above_threshold() -> None:
+    findings = detect_subagent_usage(_sessions(subagents_completed=5))
+    assert findings == SubagentUsage(completed_count=5)
+
+
+def test_detect_subagent_usage_emits_at_most_one_finding() -> None:
+    sessions = _sessions(subagents_completed=4)
+    findings = detect_subagent_usage(sessions)
+    assert findings == SubagentUsage(completed_count=4)
+    insights = compute_insights(_tools(), sessions)
+    assert insights.subagent_usage == findings
+
+
+def test_compute_insights_keeps_existing_rules_independent_of_subagent_usage() -> None:
+    insights = compute_insights(
+        _tools(
+            _tool("Read", calls=8, successes=8, failures=0, result_bytes=196608),
+            _tool("Bash", calls=3, successes=0, failures=3, result_bytes=0),
+        ),
+        _sessions(compactions=3, subagents_completed=4, count=1),
+    )
+    assert insights.repeated_tool_calls == (
+        RepeatedToolCall(tool_name="Bash", call_count=3),
+        RepeatedToolCall(tool_name="Read", call_count=8),
+    )
+    assert insights.repeated_failed_tool_calls == (RepeatedFailedToolCall(tool_name="Bash", failure_count=3),)
+    assert insights.high_tool_result_volume == (HighToolResultVolume(tool_name="Read", result_bytes=196608),)
+    assert insights.high_tool_failure_rate == (_failure_rate_finding("Bash", failed_calls=3, total_calls=3),)
+    assert insights.dominant_tool == DominantTool(
+        tool_name="Read",
+        call_count=8,
+        total_calls=11,
+        share_percent=72,
+    )
+    assert insights.compaction_pressure == CompactionPressure(compaction_count=3)
+    assert insights.subagent_usage == SubagentUsage(completed_count=4)
+
+
+def test_subagent_usage_contains_only_safe_evidence() -> None:
+    _assert_safe_finding(SubagentUsage(completed_count=2), "completed_count")

@@ -10,6 +10,7 @@ from coding_agent_performance.trace.report import (
     DominantTool,
     DurationStats,
     Insights,
+    SubagentUsage,
     ToolBreakdown,
     TraceSummary,
     UsageSource,
@@ -179,6 +180,7 @@ def _insights_dict(insights: Insights) -> dict[str, object]:
         ],
         "dominant_tool": _dominant_tool_dict(insights.dominant_tool),
         "compaction_pressure": _compaction_pressure_dict(insights.compaction_pressure),
+        "subagent_usage": _subagent_usage_dict(insights.subagent_usage),
     }
 
 
@@ -197,6 +199,12 @@ def _compaction_pressure_dict(finding: CompactionPressure | None) -> dict[str, i
     if finding is None:
         return None
     return {"compaction_count": finding.compaction_count}
+
+
+def _subagent_usage_dict(finding: SubagentUsage | None) -> dict[str, int] | None:
+    if finding is None:
+        return None
+    return {"completed_count": finding.completed_count}
 
 
 def render_json(summary: TraceSummary) -> str:
@@ -353,6 +361,13 @@ def _insight_lines(insights: Insights) -> list[str]:
             lines,
             "Compaction pressure",
             (f"- {finding.compaction_count} compactions",),
+        )
+    if insights.subagent_usage is not None:
+        finding = insights.subagent_usage
+        _append_insight_group(
+            lines,
+            "Subagent usage",
+            (f"- {finding.completed_count} completed",),
         )
     return lines
 

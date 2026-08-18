@@ -33,11 +33,11 @@ In scope today:
 - OTLP HTTP/JSON decoding
 - Claude Code allowlist normalization
 - Incremental, deterministic text and JSON summaries, including capture-level tool execution counts and an integer basis-point success rate
-- Deterministic insight rules for repeated tool calls, repeated failed tool calls, high cumulative tool result volume, high tool failure rate, dominant tool usage, and compaction pressure
+- Deterministic insight rules for repeated tool calls, repeated failed tool calls, high cumulative tool result volume, high tool failure rate, dominant tool usage, compaction pressure, and subagent usage
 
 Out of scope today:
 
-- Additional insight rules (loops, oversized individual outputs, subagent analysis)
+- Additional insight rules (loops, oversized individual outputs)
 - Recommendations, scores, and capture comparison
 - Reading Claude Code transcripts under `~/.claude/projects`
 - Databases, remote HTTP APIs, public network binds, TLS, gRPC, and protobuf
@@ -141,7 +141,7 @@ Domain records live in `trace/records.py`. They carry only the fields required f
 
 ## Incremental summarizer
 
-`IncrementalSummarizer` orchestrates capture ingestion and finalization. Mutable aggregation state lives in cohesive accumulators for capture, session, usage, tool, metric, and coverage concerns. Each accumulator owns the operations that maintain its invariants and emits an immutable report DTO. `InsightAnalyzer` then consumes provider-neutral summary evidence, currently `ToolStats`, and produces deterministic `Insights`. Rendering reads the finished `TraceSummary` only.
+`IncrementalSummarizer` orchestrates capture ingestion and finalization. Mutable aggregation state lives in cohesive accumulators for capture, session, usage, tool, metric, and coverage concerns. Each accumulator owns the operations that maintain its invariants and emits an immutable report DTO. `InsightAnalyzer` then consumes provider-neutral summary evidence, currently `ToolStats` and `SessionStats`, and produces deterministic `Insights`. Rendering reads the finished `TraceSummary` only.
 
 `api_request` events are the preferred source for tokens, cost, duration, model, and query source. If any remain after deduplication, token and cost metrics are ignored for those totals. Otherwise the summarizer falls back to `claude_code.token.usage` and `claude_code.cost.usage`.
 
@@ -170,7 +170,7 @@ Likely shape, kept high-level on purpose:
 
 1. **Ingestion.** Isolated adapters configure or read vendor-specific sources and emit raw captures. The Claude Code path is OTLP HTTP/JSON; other agents may differ.
 2. **Normalization.** A provider-independent layer turns raw envelopes into shared records. That layer does not live inside the HTTP receiver.
-3. **Domain.** Deterministic insight rules operate on immutable summary evidence through `InsightAnalyzer`. Repeated tool calls, repeated failed tool calls, high cumulative tool result volume, high tool failure rate, dominant tool usage, and compaction pressure are implemented. Future rules may detect loops, redundant calls, oversized individual outputs, and later support a Context Ledger. New insight rules should extend the analyzer or remain small stateless functions; they should not add mutable state to report DTOs.
+3. **Domain.** Deterministic insight rules operate on immutable summary evidence through `InsightAnalyzer`. Repeated tool calls, repeated failed tool calls, high cumulative tool result volume, high tool failure rate, dominant tool usage, compaction pressure, and subagent usage are implemented. Future rules may detect loops, redundant calls, oversized individual outputs, and later support a Context Ledger. New insight rules should extend the analyzer or remain small stateless functions; they should not add mutable state to report DTOs.
 4. **Search.** Code search optimized for LLM consumption, still local.
 5. **Output.** Concise structured reports for humans and agents.
 
