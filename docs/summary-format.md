@@ -302,12 +302,14 @@ Pre-alpha contract for `capt trace handoff --format json`.
 The handoff schema version is independent from `TraceSummary.schema_version`
 and from comparison JSON. Current handoff `schema_version` is `1`.
 
-`capt trace handoff CAPTURE` summarizes one explicit local capture through the
-existing bounded path, then copies a compact allowlist into a `TraceHandoff`.
-JSON is the canonical structured representation. Text is the default CLI
-format and reports the same identity, aggregate values, and insight
-presence or absence. Stdout is the default. An explicit `--output` path
-persists the same representation to a local file.
+`capt trace handoff` summarizes one explicit local capture or `--latest`
+through the existing bounded path, then copies a compact allowlist into a
+`TraceHandoff`. `--latest` selects the same newest eligible capture as
+`capt trace summarize --latest`. JSON is the canonical structured
+representation. Text is the default CLI format and reports the same
+identity, aggregate values, and insight presence or absence. Stdout is
+the default. An explicit `--output` path persists the same representation
+to a local file.
 
 The handoff is an evidence extract. It does not invent goals, TODOs,
 recommendations, or a next action. Insights are copied from the existing
