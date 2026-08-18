@@ -13,6 +13,4 @@ def test_speckit_workflow_requires_analyze_before_spec_pr_handoff() -> None:
 def test_development_workflow_creates_branch_before_specification_pr() -> None:
     text = Path("docs/development.md").read_text(encoding="utf-8")
     section = text[text.index("## Development workflow") : text.index("## Agent-assisted workflow")]
-    assert section.index("Create a focused branch") < section.index(
-        "opens a specification-only review PR"
-    )
+    assert section.index("Create a focused branch") < section.index("opens a specification-only review PR")
