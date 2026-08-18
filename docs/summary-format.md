@@ -6,6 +6,9 @@ This document describes the JSON object written to stdout. It is versioned by
 `schema_version` inside the payload. There is no formal JSON Schema in this
 release.
 
+The same file also documents `capt trace compare --format json`. That comparison
+contract has its own `schema_version` and does not change the summary schema.
+
 The summary is produced deterministically from a local CAPT JSONL capture. It
 does not call a model, score quality, or emit recommendations.
 
@@ -211,3 +214,82 @@ completed subagents.
 
 Insight findings contain only allowlisted evidence. Tool arguments, results,
 error payloads, prompts, identifiers, and absolute paths are never included.
+
+## Comparison format
+
+Pre-alpha contract for `capt trace compare --format json`.
+
+The comparison schema version is independent from `TraceSummary.schema_version`.
+Current comparison `schema_version` is `1`.
+
+`capt trace compare BASELINE CANDIDATE` summarizes each distinct capture through
+the existing bounded path. If both arguments resolve to the same filesystem
+object, CAPT summarizes that object once and reuses the immutable snapshot.
+
+Comparison is local and deterministic. It does not score quality, name a winner,
+emit percentages, or recommend a next action.
+
+### Privacy
+
+Successful comparison output may contain only fixed metric names, availability
+state, and allowlisted integer aggregates. It never includes capture paths,
+session identifiers, prompts, responses, tool content, or provider provenance.
+
+### Top-level object
+
+The only top-level keys are `schema_version` and `metrics`, in that order.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `schema_version` | integer | Comparison document version. Currently `1`. |
+| `metrics` | object | Exactly eight comparison slots in fixed order |
+
+### Metric slots
+
+`metrics` contains exactly these keys, in this order:
+
+1. `tool_calls`
+2. `tool_failures`
+3. `tool_result_bytes`
+4. `model_requests`
+5. `estimated_cost_usd_micros`
+6. `input_tokens`
+7. `output_tokens`
+8. `session_compactions`
+
+Every slot contains exactly `available`, `baseline`, `candidate`, and `delta`,
+in that order.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `available` | boolean | True only when both captures have observed evidence for the metric |
+| `baseline` | integer or `null` | Baseline value when available |
+| `candidate` | integer or `null` | Candidate value when available |
+| `delta` | integer or `null` | `candidate - baseline` when available |
+
+When `available` is `true`, the three numeric fields are integers. When
+`available` is `false`, all three numeric fields are JSON `null`. CAPT never
+substitutes zero for missing telemetry and never reports a percentage delta.
+
+### Availability
+
+Availability is tracked per metric from normalized coverage, not from
+`value != 0`.
+
+- `tool_calls` is available only when tool-event telemetry was observed.
+- `tool_failures` additionally requires a valid success status on every counted
+  tool event. A missing or invalid `success` attribute leaves failures
+  unavailable even though existing summaries still treat that event as
+  successful.
+- `tool_result_bytes` requires result-size evidence for every counted tool call.
+- `model_requests` is available only when at least one normalized API-request
+  event exists. There is no observed-zero request count in v1.
+- `estimated_cost_usd_micros`, `input_tokens`, and `output_tokens` are
+  independently available only when their own API-request fields or fallback
+  metric series were observed completely.
+- `session_compactions` is available when log coverage exists that could have
+  included compaction events. Metrics-only captures leave it unavailable.
+
+An observed numeric zero is comparable only when that metric has affirmative
+coverage proving zero. Text output uses the same eight slot names and the same
+availability and integer values as JSON.
