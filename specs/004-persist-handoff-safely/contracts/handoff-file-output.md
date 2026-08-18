@@ -40,14 +40,15 @@ Repeating a successful write to a new path produces byte-identical files for the
 
 | Destination | `--force` | Result |
 | --- | --- | --- |
-| missing regular path, parent exists | ignored | create |
+| missing path, parent exists | ignored | create |
 | existing regular file | no | fail; file unchanged |
-| existing regular file | yes | atomic replace with complete new content |
-| symbolic link, including dangling | any | fail; target unchanged |
+| existing regular file | yes | replace with complete new content |
+| symbolic link, including dangling | any | fail; link unchanged |
 | directory | any | fail; directory unchanged |
+| FIFO, Unix socket, device, or other non-regular existing path | any | fail; object unchanged |
 | `--force` without `--output` | yes | fail; no file written |
 
-Parent directories are not created. A parent that is a symlink to a directory is allowed. The destination path itself must not be a symlink.
+Parent directories are not created. A parent that is a symlink to a directory is allowed. The destination path itself must be missing or, with `--force`, an existing regular file.
 
 ## Failure messages
 
@@ -59,6 +60,7 @@ Exit code `1`. No traceback. No payload. No absolute path. Basename only when a 
 | existing regular file, no `--force` | `Handoff file already exists: {basename}` |
 | destination is a symbolic link | `Could not write handoff file: path is a symbolic link.` |
 | destination is a directory | `Could not write handoff file: path is a directory.` |
+| destination exists and is any other non-regular type | `Could not write handoff file: path is not a regular file.` |
 | parent missing | `Could not write handoff file: parent directory does not exist.` |
 | parent is not a directory | `Could not write handoff file: parent path is not a directory.` |
 | other write `OSError` | `Could not write handoff file: {strerror}` with no path |
@@ -69,13 +71,16 @@ Capture-input errors keep the existing handoff mapping and are not redefined her
 
 Implementation MUST:
 
-1. inspect the destination with a non-following `lstat`
+1. inspect the destination with a non-following `lstat` and refuse every existing non-regular type
 2. write the complete UTF-8 representation to an exclusive sibling temporary file in the same parent directory
 3. `fsync` that temporary file
-4. publish exclusively when `--force` is absent (`os.link` on POSIX, `os.rename` on Windows; both fail if the destination exists) or with `os.replace` when `--force` is present
-5. remove the temporary file on any failure
+4. publish (the commit): exclusive `os.link` on POSIX or `os.rename` on Windows when `--force` is absent; on `--force`, POSIX `O_NOFOLLOW` open plus `fstat` of a regular file, then `os.replace`
+5. if publish fails, remove the temporary file and leave the destination unchanged
+6. if publish succeeds, unlink the temporary file best-effort; do not roll back the destination if that unlink fails
 
-The destination MUST NOT contain a truncated handoff after a failed write.
+The destination MUST NOT contain a truncated handoff after a failed publish.
+
+Sequential type checks are the guaranteed contract. A concurrent process swapping the destination path between the type check and publish is outside this slice.
 
 ## Privacy
 

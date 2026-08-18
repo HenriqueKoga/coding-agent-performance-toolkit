@@ -43,11 +43,11 @@ description: "Task list for persist compact trace handoff safely"
 
 **Checkpoint**: `write_handoff_file()` can be unit-tested without CLI rendering
 
-- [ ] T002 Add failing unit tests in `tests/test_handoff_output.py` for creating a new file with complete synthetic content, POSIX `0600` where `os.name == "posix"`, and cleanup of a sibling temporary file after a forced write failure
+- [ ] T002 Add failing unit tests in `tests/test_handoff_output.py` for creating a new file with complete synthetic content, POSIX `0600` where `os.name == "posix"`, and cleanup of a sibling temporary file after a failed publish
 - [ ] T003 Implement `HandoffOutputError` and `write_handoff_file(path, content, *, overwrite)` in `src/coding_agent_performance/trace/handoff_output.py` using `~` expansion and a non-following destination `lstat`; do not call `Path.resolve()` on the destination
 - [ ] T004 Implement parent-directory checks in `src/coding_agent_performance/trace/handoff_output.py`: parent must exist and be a directory; do not `mkdir`; do not chmod the parent; emit the contract messages from `specs/004-persist-handoff-safely/contracts/handoff-file-output.md`
-- [ ] T005 Implement exclusive sibling-temp create (`O_CREAT|O_EXCL`), UTF-8 write, flush, `fsync`, POSIX `chmod 0o600`, exclusive no-overwrite publish (`os.link` on POSIX, `os.rename` on Windows; never `os.replace` in that branch), and `os.replace` only when `overwrite=True` in `src/coding_agent_performance/trace/handoff_output.py`; `unlink` the temp on any failure
-- [ ] T006 Assert in `tests/test_handoff_output.py` that destination symlinks (including dangling) and directories fail even when `overwrite=True`, that an existing regular file fails when `overwrite=False` with `Handoff file already exists: {basename}`, and that no absolute path appears in `HandoffOutputError` messages
+- [ ] T005 Implement exclusive sibling-temp create (`O_CREAT|O_EXCL`), UTF-8 write, flush, `fsync`, POSIX `chmod 0o600`, exclusive no-overwrite publish (`os.link` on POSIX, `os.rename` on Windows; never `os.replace` in that branch), `--force` POSIX `O_NOFOLLOW` open plus `fstat` then `os.replace`, publish-as-commit, and best-effort temp unlink after success in `src/coding_agent_performance/trace/handoff_output.py`; on failed publish, `unlink` the temp and leave dest unchanged
+- [ ] T006 Assert in `tests/test_handoff_output.py` that destination symlinks (including dangling), directories, and POSIX FIFOs (`os.mkfifo`) fail even when `overwrite=True` with the contract messages, that an existing regular file fails when `overwrite=False` with `Handoff file already exists: {basename}`, and that no absolute path appears in `HandoffOutputError` messages
 
 ---
 
@@ -73,14 +73,14 @@ description: "Task list for persist compact trace handoff safely"
 
 ## Phase 4: User Story 2 - Refuse unsafe writes and overwrite only when asked (Priority: P2)
 
-**Goal**: Existing files, destination symlinks, directories, and missing parents fail closed; `--force` replaces a regular file only.
+**Goal**: Existing files, destination symlinks, directories, FIFOs, and missing parents fail closed; `--force` replaces a regular file only.
 
 **Independent Test**: Exercise the contract table in `specs/004-persist-handoff-safely/contracts/handoff-file-output.md` through the CLI.
 
 ### Tests
 
 - [ ] T011 [P] [US2] Add CLI tests in `tests/test_handoff.py` for refuse-overwrite without `--force`, `--force` replacement of a regular file, and `--force` without `--output` printing `Provide --output with --force.`
-- [ ] T012 [P] [US2] Add CLI tests in `tests/test_handoff.py` for destination symlink, destination directory, missing parent, and non-directory parent; assert non-zero exit, unchanged destination, no created parents, no leftover sibling temp, no traceback, and no absolute path on stderr
+- [ ] T012 [P] [US2] Add CLI tests in `tests/test_handoff.py` for destination symlink, destination directory, POSIX FIFO, missing parent, and non-directory parent; assert non-zero exit even with `--force`, unchanged destination, no created parents, no leftover sibling temp after failed publish, no traceback, and no absolute path on stderr
 
 ### Implementation
 
@@ -150,6 +150,7 @@ MVP is Phase 2 plus User Story 1: explicit `--output` create-if-absent with byte
 - Do not reuse `CaptureWriter` or `CaptureStorageError`.
 - Do not print absolute paths on success or failure.
 - Do not follow destination symlinks.
+- Do not replace directories, FIFOs, sockets, devices, or other non-regular existing paths, even with `--force`.
 - Do not create missing parent directories.
 - Do not chmod operator-selected parent directories.
 - `/speckit.taskstoissues` and `/speckit.implement` are not part of the CAPT production lifecycle.

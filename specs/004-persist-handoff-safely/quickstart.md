@@ -20,7 +20,7 @@ capt trace handoff CAPTURE [--format text|json] [--output PATH] [--force]
 2. **File identity**: write `--output` for text and JSON into a new file under a temporary directory. File bytes equal a stdout run of the same capture and format. Stdout of the file run has no handoff body.
 3. **Refuse overwrite**: write once, then write again to the same path without `--force`. Second run exits non-zero; first file is unchanged.
 4. **Explicit overwrite**: repeat with `--force` against a regular file. File becomes the new complete representation. `0600` holds on POSIX.
-5. **Unsafe destinations**: destination symlink, directory, missing parent, `--force` without `--output`. All fail closed. No parent directories are created. No leftover `.capt-tmp-` sibling remains.
+5. **Unsafe destinations**: destination symlink, directory, POSIX FIFO, missing parent, `--force` without `--output`. All fail closed. No parent directories are created. Failed publish leaves no leftover `.capt-tmp-` sibling.
 6. **Privacy**: synthetic prompt/path/payload markers in the capture must not appear in the file, stdout, or stderr. File-write errors must not include absolute paths.
 7. **README audit**: README documents compare and handoff, including `--output`/`--force`, and no longer claims insights are absent. Public command list matches Typer `--help`.
 

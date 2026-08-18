@@ -24,17 +24,23 @@ This Phase 0 note records choices the spec already pins. There are no remaining 
 - **Rationale**: The Issue requires semantic identity with the selected representation and JSON v1 unchanged. Byte identity is testable and avoids a second renderer.
 - **Alternatives considered**: Pretty-printed files, omitted trailing newline, or a different JSON encoding. Rejected as a silent contract fork.
 
-## Destination symlink and parent creation
+## Destination type and parent creation
 
-- **Decision**: Refuse if the destination path is a symbolic link, including a dangling link, even with `--force`. Do not create missing parents. A parent that is a symlink to a directory is allowed.
-- **Rationale**: Following a destination symlink would let `--force` clobber an unintended target. Creating parents is implicit persistence. A linked parent is a normal way to name a directory the operator already has.
-- **Alternatives considered**: `Path.resolve()` then write, `mkdir(parents=True)`, and `--force` replacing through a symlink. Rejected as symlink follow, implicit directories, or redirectable overwrite.
+- **Decision**: Refuse any existing destination that is not a regular file, even with `--force`: symbolic link (including dangling), directory, FIFO, Unix socket, device, or other special file. Do not create missing parents. A parent that is a symlink to a directory is allowed.
+- **Rationale**: `--force` replacing through a symlink, FIFO, or device would clobber an unintended object. Checking only symlink and directory leaves those other types for `os.replace`. Creating parents is implicit persistence.
+- **Alternatives considered**: `Path.resolve()` then write, `mkdir(parents=True)`, `--force` replacing through a symlink, and treating FIFO/device as overwriteable files. Rejected as symlink follow, implicit directories, or redirectable overwrite.
 
 ## Atomic publish
 
-- **Decision**: Exclusive-create a sibling temporary file, write and `fsync`, then exclusive publish. Without `--force`, POSIX uses `os.link` (fails if dest exists) and Windows uses `os.rename` (fails if dest exists). With `--force`, use `os.replace` only after a non-following `lstat` confirmed a regular file. Delete the temporary file on any failure. Never write the destination in place.
-- **Rationale**: In-place writes leave truncated files on failure. POSIX `os.rename` would replace an existing dest, so `link` is required there. Windows `os.rename` already refuses an existing dest, so `os.replace` must not be used without `--force`. CaptureWriter already uses `O_CREAT|O_EXCL` for captures; handoff needs a complete-file publish rather than append, so copy the exclusive-create idea into a small helper instead of extending `CaptureWriter`.
-- **Alternatives considered**: Direct `open(dest, "w")`, `tempfile.NamedTemporaryFile` in `/tmp` then rename across filesystems, `os.link` on Windows, or adding `overwrite=` to `CaptureWriter`. Rejected as partial-write hazard, non-atomic cross-device rename, an unreliable Windows hard-link requirement, or a generic persistence API.
+- **Decision**: Exclusive-create a sibling temporary file, write and `fsync`, then publish. **Publish is the commit.** Without `--force`, POSIX uses `os.link` (fails if dest exists) and Windows uses `os.rename` (fails if dest exists). After a successful exclusive `link`, `unlink(temp)` is cleanup, not publish: if unlink fails, dest already has the complete content via the new hard link, so the write succeeds and dest is not rolled back. With `--force`, confirm a regular file with non-following `lstat`, then on POSIX `open(..., O_WRONLY | O_NOFOLLOW)` plus `fstat`, then `os.replace`. Never write the destination in place.
+- **Rationale**: In-place writes leave truncated files on a failed write. POSIX `os.rename` would replace an existing dest, so `link` is required there. Treating `link`+`unlink` as one all-or-nothing failure path contradicts the fact that `link` already published dest. `O_NOFOLLOW` catches a symlink that appeared after `lstat` before `replace` in sequential use. CaptureWriter already uses `O_CREAT|O_EXCL` for captures; handoff needs a complete-file publish rather than append.
+- **Alternatives considered**: Direct `open(dest, "w")`; treating any exception after `link` as dest-unchanged; requiring a portable syscall that replaces only a regular file; `os.link` on Windows; adding `overwrite=` to `CaptureWriter`. Rejected as partial-write hazard, an unmeetable rollback, no portable type-enforcing replace, an unreliable Windows hard-link requirement, or a generic persistence API.
+
+## Concurrent destination mutation
+
+- **Decision**: The guaranteed contract is sequential use. CAPT does not promise to win a TOCTOU race against another process that swaps the destination path between the type check and publish. No portable single operation both replaces a regular file and refuses a concurrently installed symlink.
+- **Rationale**: `os.replace` operates on the path. Holding an `O_NOFOLLOW` fd does not lock that path. Narrowing the race promise is honest; inventing a kernel-specific replace would expand scope.
+- **Alternatives considered**: In-place write through `O_NOFOLLOW` (partial dest on crash) or Linux-only `renameat2` flags. Rejected as worse failure mode or non-portable scope.
 
 ## Permissions
 

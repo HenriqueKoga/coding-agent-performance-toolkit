@@ -18,6 +18,8 @@ This is a read-only consistency assessment of the proposed specification artifac
 | A1 | Ambiguity | LOW | `plan.md` CLI orchestration | Text stdout still uses `typer.echo` while JSON uses `sys.stdout.write`. File identity is defined as matching those existing stdout bytes. | Do not invent a third newline convention. Tests must compare file bytes to a real stdout run, not to a reconstructed string that skips `typer.echo`. |
 | U1 | Underspecification | LOW | `tasks.md` T015 | README assertions check command names and insight-contradiction phrases, not every optional flag already documented for collect/list/summarize. | Keep T015 focused on compare/handoff/file-output plus insight-status fixes. T016 still audits the full Typer surface by hand. |
 
+Codex review of commit `51fe360` asked to refuse non-regular special files, to close or narrow the `--force` replace race, and to split POSIX `link` publish from temp unlink. Those items are now pinned in spec FR-007/009/010, the plan publish steps, the contract table, T005/T006/T012, and research. They are not open findings.
+
 No CRITICAL or HIGH findings.
 
 **Coverage Summary Table:**
@@ -30,10 +32,10 @@ No CRITICAL or HIGH findings.
 | FR-004 `--output` success: file, empty stdout | Yes | T008, T009 | |
 | FR-005 byte identity including newline | Yes | T008 | Compared to a stdout run |
 | FR-006 refuse existing regular file | Yes | T006, T011 | |
-| FR-007 `--force` only with `--output`; regular file only | Yes | T011, T013 | |
+| FR-007 `--force` only with `--output`; regular file only | Yes | T011, T013 | Non-regular types refused |
 | FR-008 missing/non-directory parent; no mkdir | Yes | T004, T012 | |
-| FR-009 destination symlink refused even with `--force` | Yes | T006, T012 | Includes dangling |
-| FR-010 sibling temp, exclusive/atomic publish, cleanup | Yes | T002, T005, T012 | POSIX `link`, Windows `rename`, `--force` uses `replace` |
+| FR-009 refuse every existing non-regular dest | Yes | T006, T012 | Symlink, directory, POSIX FIFO |
+| FR-010 sibling temp, publish-as-commit, cleanup | Yes | T002, T005, T012 | POSIX `link` is commit; temp unlink is cleanup |
 | FR-011 POSIX `0600`; no parent chmod | Yes | T002, T004, T005 | |
 | FR-012 concise path-free payload-free errors | Yes | T006, T010, T012, T014 | Basename allowed |
 | FR-013 no allowlist broadening | Yes | T010, T014, T019 | `handoff_from_summary()` unchanged |
@@ -44,8 +46,8 @@ No CRITICAL or HIGH findings.
 | FR-018 Typer surface is README authority | Yes | T016 | |
 | SC-001 file bytes predictable from stdout | Yes | T008 | |
 | SC-002 omitting `--output` indistinguishable | Yes | T007 | |
-| SC-003 existing file unchanged without `--force` | Yes | T006, T011 | |
-| SC-004 no truncated dest or leftover temp | Yes | T002, T005, T012 | |
+| SC-003 existing file unchanged without `--force` | Yes | T006, T011 | Non-regular also unchanged with `--force` |
+| SC-004 no truncated dest after failed publish | Yes | T002, T005, T012 | Successful publish does not roll back if temp unlink fails |
 | SC-005 no paths/payloads in file or errors | Yes | T006, T012, T014 | |
 | SC-006 POSIX `0600` | Yes | T002, T005 | |
 | SC-007 README compare/handoff/insights | Yes | T015, T016, T017 | |
@@ -79,7 +81,7 @@ Human approval remains the gate: after merge, Issue #58 is reduced to an operati
 
 ## Cross-artifact consistency
 
-- Spec, plan, and contract agree on `--output`, `--force` only with `--output`, byte-identical files, silent stdout on successful file write, refuse destination symlinks, no parent creation, and POSIX `0600`.
+- Spec, plan, and contract agree on `--output`, `--force` only with `--output`, byte-identical files, silent stdout on successful file write, refuse every existing non-regular destination, publish-as-commit, no parent creation, and POSIX `0600`.
 - JSON v1 is explicitly not versioned here; tasks forbid `handoff.py` allowlist changes.
 - README work is bounded to current public Typer commands plus contradiction fixes. Product/architecture/summary-format stdout-only sentences are updated because they would otherwise become false.
 - Issue #58 is the existing operational Agent Task. This specification PR does not dispatch implementation, mutate #58, or apply `agent:ready`.

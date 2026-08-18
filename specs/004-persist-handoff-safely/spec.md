@@ -32,19 +32,19 @@ When they name an output file that does not already exist, CAPT writes exactly t
 
 ### User Story 2 - Refuse unsafe writes and overwrite only when asked (Priority: P2)
 
-A developer naming a handoff file must not silently replace an existing file, follow a symbolic link, write into a directory, leave a truncated final file, or learn absolute paths or capture contents from an error. If they intentionally replace a regular file, they pass an explicit `--force` together with `--output`.
+A developer naming a handoff file must not silently replace an existing file, follow a symbolic link, write into a directory or special file, leave a truncated final file, or learn absolute paths or capture contents from an error. If they intentionally replace a regular file, they pass an explicit `--force` together with `--output`.
 
 **Why this priority**: File output is only useful if it cannot clobber or leak by default. Overwrite is independently testable once create-if-absent works.
 
-**Independent Test**: Attempt writes against existing files, directories, symbolic links, missing parents, and failed writes. Confirm refusal by default, `--force` replacement of a regular file, unchanged destinations after failures, restricted permissions where the platform supports them, and concise path-free payload-free errors.
+**Independent Test**: Attempt writes against existing files, directories, symbolic links, POSIX FIFOs, missing parents, and failed writes. Confirm refusal by default, `--force` replacement of a regular file, unchanged destinations after failed publish, restricted permissions where the platform supports them, and concise path-free payload-free errors.
 
 **Acceptance Scenarios**:
 
 1. **Given** `--output` pointing at an existing regular file and no `--force`, **When** the command is run, **Then** CAPT exits non-zero, leaves that file unchanged, and does not write a partial replacement.
-2. **Given** `--output` pointing at an existing regular file and `--force`, **When** the command is run, **Then** CAPT replaces that file with the complete selected handoff representation and does not follow or replace a symbolic link or directory.
+2. **Given** `--output` pointing at an existing regular file and `--force`, **When** the command is run, **Then** CAPT replaces that file with the complete selected handoff representation and does not follow or replace a symbolic link, directory, FIFO, or other non-regular path.
 3. **Given** `--force` without `--output`, **When** the command is run, **Then** CAPT exits non-zero and does not write a file.
-4. **Given** `--output` whose parent directory is missing, whose parent is not a directory, whose path is a directory, or whose path is a symbolic link, **When** the command is run, **Then** CAPT exits non-zero, does not create missing parents, and leaves the destination unchanged.
-5. **Given** a write that fails after a temporary sibling file was created, **When** the command exits, **Then** that temporary file is gone and the final destination is either absent or still the previous complete file.
+4. **Given** `--output` whose parent directory is missing, whose parent is not a directory, whose path is a directory, whose path is a symbolic link, or whose path is a POSIX FIFO, **When** the command is run, **Then** CAPT exits non-zero, does not create missing parents, and leaves the destination unchanged, even if `--force` is present.
+5. **Given** a publish that fails after a temporary sibling file was created, **When** the command exits, **Then** that temporary file is gone and the final destination is either absent or still the previous complete file.
 
 ### User Story 3 - Keep the README aligned with the public CLI (Priority: P3)
 
@@ -71,10 +71,13 @@ A new user reading the repository README should see the commands they can actual
 - `--force` is passed without `--output`: refuse.
 - Destination path is a symbolic link, including a dangling link: refuse, even with `--force`.
 - Destination path is a directory: refuse, even with `--force`.
+- Destination path is a FIFO, Unix socket, device, or any other existing non-regular object: refuse, even with `--force`. The destination is left unchanged.
 - Parent directory is missing: refuse; do not create it.
 - Parent path exists but is not a directory: refuse.
-- Parent directory is a symbolic link to a directory: allowed; only the final path component is refused when it is a symbolic link.
-- Write fails for permissions, disk, or a race that creates the destination without `--force`: destination is unchanged, any sibling temporary file is removed, no partial final artifact remains.
+- Parent directory is a symbolic link to a directory: allowed; only the final path component is refused when it is not a missing path or a regular file.
+- Publish fails (destination exists without `--force`, type refused, permissions, disk): destination is unchanged, the sibling temporary file is removed, no partial final artifact remains.
+- Publish succeeds and later temp cleanup fails: destination already holds the complete new handoff and MUST NOT be rolled back. Temp unlink is then best-effort.
+- A concurrent process that replaces the destination path between the type check and publish is outside the guaranteed contract. Sequential use is what this slice promises.
 - Output path uses `~` expansion the same way other CAPT path options already do.
 - Output path `-` is an ordinary filename, not a stdout synonym.
 - `--latest` remains invalid on `capt trace handoff`.
@@ -94,10 +97,10 @@ A new user reading the repository README should see the commands they can actual
 - **FR-004**: When `--output` is present and the write succeeds, CAPT MUST persist the selected representation and MUST NOT print the handoff body to stdout.
 - **FR-005**: Persisted content MUST be byte-identical to the stdout representation that the same capture and `--format` would produce without `--output`, including the trailing newline. JSON v1 field order, values, and allowlist MUST remain unchanged.
 - **FR-006**: CAPT MUST NOT silently overwrite an existing path. If the destination already exists as a regular file and `--force` is absent, the command MUST fail and leave that file unchanged.
-- **FR-007**: CAPT MUST accept `--force` only together with `--output`. `--force` without `--output` MUST fail. `--force` MAY replace an existing regular file. `--force` MUST NOT replace a symbolic link or a directory.
+- **FR-007**: CAPT MUST accept `--force` only together with `--output`. `--force` without `--output` MUST fail. `--force` MAY replace an existing regular file only. `--force` MUST NOT replace a symbolic link, directory, FIFO, Unix socket, device, or any other existing non-regular path.
 - **FR-008**: CAPT MUST refuse a destination whose parent is missing or is not a directory. It MUST NOT create parent directories.
-- **FR-009**: CAPT MUST refuse a destination that is a symbolic link, including a dangling link, even when `--force` is present. Existence and type checks MUST NOT follow the destination path.
-- **FR-010**: File creation MUST use exclusive local semantics. The complete representation is written to a sibling temporary file in the same parent directory, then atomically replaced onto the destination. On any failure, CAPT MUST remove that temporary file and MUST leave the destination either absent or still the previous complete file. The destination MUST NOT retain a truncated or partially written handoff.
+- **FR-009**: CAPT MUST refuse a destination that exists and is not a regular file, including a symbolic link (dangling included), directory, FIFO, Unix socket, or device, even when `--force` is present. Existence and type checks MUST NOT follow the destination path. A missing path is the only destination that may be created without `--force`.
+- **FR-010**: File creation MUST use exclusive local semantics. The complete representation is written to a sibling temporary file in the same parent directory, then published onto the destination. **Publish is the commit.** If publish fails, CAPT MUST remove that temporary file and MUST leave the destination either absent or still the previous complete file. If publish succeeds, the destination MUST contain the complete representation; a later failure to unlink the temporary file MUST NOT roll back the destination and MUST NOT turn a completed write into a user-visible failure. The destination MUST NOT retain a truncated or partially written handoff after a failed publish. This slice does not promise to win a TOCTOU race against another process mutating the destination path between the type check and publish; sequential use is the guaranteed contract.
 - **FR-011**: Newly created or replaced handoff files MUST use restricted permissions `0600` where the platform supports that mode. CAPT MUST NOT chmod the parent directory. Inability to apply a POSIX-only mode on a non-POSIX platform MUST NOT fail a successful write.
 - **FR-012**: File-write and option-combination errors MUST exit non-zero with concise stderr, no traceback, no payload contents, no interpolated envelope fields, and no absolute path. A filename basename MAY appear. Capture-input errors MUST keep the existing handoff-specific mapping already established for this command.
 - **FR-013**: Handoff construction MUST remain a deterministic transformation of the finished provider-neutral summary. File output MUST NOT broaden the compact allowlist, weaken text sanitization, or re-read raw capture payloads.
@@ -110,7 +113,7 @@ A new user reading the repository README should see the commands they can actual
 ### Key Entities
 
 - **HandoffFileTarget**: An operator-selected local destination for one handoff representation. It has an explicit path and an overwrite intent that is false unless `--force` is present with `--output`. It is not a ledger entry, capture, or discovered artifact.
-- **HandoffFileWrite**: The result of attempting to persist one complete text or JSON representation. Success means the destination contains the full byte-identical representation and stdout has no handoff body. Failure means the destination is unchanged and any sibling temporary file is removed.
+- **HandoffFileWrite**: The result of attempting to persist one complete text or JSON representation. Success means the destination contains the full byte-identical representation and stdout has no handoff body. Failed publish means the destination is unchanged and the sibling temporary file is removed. Success with a later temp-unlink miss still counts as success: the destination is complete and is not rolled back.
 
 ## CAPT constraints *(mandatory)*
 
@@ -185,8 +188,9 @@ Plus focused checks covering:
 - refusal to overwrite by default
 - `--force` replacement of a regular file only
 - `--force` without `--output`
-- symlink, existing directory, missing parent, and non-directory parent
-- no partial final artifact after failed writes
+- symlink, existing directory, POSIX FIFO or other non-regular dest, missing parent, and non-directory parent, including with `--force`
+- no partial final artifact after failed publish
+- leftover temp after successful publish does not roll back the destination
 - restricted `0600` permissions where POSIX supports them
 - no sensitive/raw capture content or absolute paths in files or errors
 - README command/capability audit against the actual public Typer surface
@@ -194,7 +198,7 @@ Plus focused checks covering:
 ### Human decisions
 
 - Human approval is required before Issue #58 receives `agent:ready`. Spec Kit must not apply that label.
-- This specification pins `--output PATH`, `--force` only with `--output`, byte-identical file content, silent stdout on successful file write, refuse-if-exists by default, refuse destination symlinks even with `--force`, no parent-directory creation, sibling temporary file plus atomic replace, POSIX `0600` on the handoff file, and a focused README synchronization.
+- This specification pins `--output PATH`, `--force` only with `--output`, byte-identical file content, silent stdout on successful file write, refuse-if-exists by default, refuse every existing non-regular destination even with `--force`, no parent-directory creation, sibling temporary file plus exclusive or `--force` publish, publish-as-commit with best-effort temp cleanup, sequential type-check guarantees rather than TOCTOU-proof races, POSIX `0600` on the handoff file, and a focused README synchronization.
 - Stop for human review if implementation would require changing handoff JSON v1, implicit persistence or Context Ledger semantics, remote storage or network behavior, a new runtime dependency, a generic artifact/persistence framework, `--latest` or broader capture discovery, changing summarize/compare/handoff contracts beyond these additive options, or README scope beyond current public behavior.
 - Spec Kit must not apply lifecycle or risk labels.
 
@@ -204,8 +208,8 @@ Plus focused checks covering:
 
 - **SC-001**: A reviewer can predict the file bytes from a stdout run of the same capture and format; they match exactly.
 - **SC-002**: Omitting `--output` leaves stdout behavior indistinguishable from the current command.
-- **SC-003**: An existing regular file is unchanged unless the operator passed both `--output` and `--force`.
-- **SC-004**: After a failed write, the destination is not a truncated handoff and no sibling temporary file remains.
+- **SC-003**: An existing regular file is unchanged unless the operator passed both `--output` and `--force`. An existing non-regular destination remains unchanged even with `--force`.
+- **SC-004**: After a failed publish, the destination is not a truncated handoff and no sibling temporary file remains. After a successful publish, the destination is complete even if temp cleanup later fails.
 - **SC-005**: Successful file output and file-write errors contain no absolute paths, prompts, responses, tool payloads, or raw envelope values.
 - **SC-006**: Where the platform supports POSIX modes, a written handoff file is not group- or world-readable (`0600`).
 - **SC-007**: A new user can find `capt trace compare` and `capt trace handoff` in the README, including file output, without being told that deterministic insights do not exist.
@@ -217,8 +221,10 @@ Plus focused checks covering:
 - Silent stdout on successful `--output` is the agent-friendly contract: the operator already supplied the path, and printing it would risk absolute-path disclosure.
 - Creating missing parents would be implicit persistence and is therefore refused.
 - `--force` is included because regenerating a named handoff file is an expected local workflow; exclusive-create-only would leave no in-CLI replacement path.
-- Destination symbolic links are refused even with `--force` so overwrite cannot be redirected to an unintended target.
+- Destination symbolic links, directories, FIFOs, sockets, devices, and other non-regular existing paths are refused even with `--force` so overwrite cannot be redirected onto an unintended object.
 - A parent directory that is itself a symlink to a directory is acceptable; the hazard called out by the Issue is the destination path.
+- Publish is the commit. `os.link` then `unlink(temp)` on POSIX without `--force` may leave a leftover temp if unlink fails after dest is already published; that leftover must not roll back dest or fail the command.
+- A concurrent mutator of the destination path between `lstat` and publish is outside this slice's guarantee. Sequential operator use is the contract.
 - CaptureWriter exclusive-create, `0600`, and cleanup-on-failure are useful concrete patterns. Copying those ideas into a small handoff-specific helper is enough; promoting them into a generic writer is not.
 - README examples may use synthetic relative paths such as `path/to/capture.jsonl` and `handoff.json`. They must not use real captures, account names, or absolute machine paths.
 - `docs/product.md`, `docs/architecture.md`, and `docs/summary-format.md` currently say handoff is stdout-only. Implementation must update those sentences so they do not contradict this additive behavior, without turning this task into a broad documentation rewrite.

@@ -8,7 +8,7 @@
 
 ## Summary
 
-Add `--output PATH` and `--force` to the existing `capt trace handoff` command so the current text or JSON representation can be written to an explicit local file. Stdout remains the default. File bytes are identical to that stdout representation. Writes use exclusive sibling-temp plus atomic replace, refuse destination symlinks and silent overwrite, and keep payload-free path-free errors. Audit the README against the actual Typer surface so compare, handoff, insights, and this file-output contract are documented without a documentation rewrite.
+Add `--output PATH` and `--force` to the existing `capt trace handoff` command so the current text or JSON representation can be written to an explicit local file. Stdout remains the default. File bytes are identical to that stdout representation. Writes use exclusive sibling-temp plus exclusive or `--force` publish, refuse every existing non-regular destination, and keep payload-free path-free errors. Audit the README against the actual Typer surface so compare, handoff, insights, and this file-output contract are documented without a documentation rewrite.
 
 ## Technical Context
 
@@ -52,7 +52,7 @@ Add `--output PATH` and `--force` to the existing `capt trace handoff` command s
 - **Bounded-memory impact**: no new accumulator state. One rendered string is written through a sibling temporary file.
 - **Provider neutrality**: write helper consumes `str` content already rendered from `TraceHandoff`. No adapter change.
 - **Compatibility**: additive `--output` and `--force` on `capt trace handoff`. Default stdout, JSON v1, and other public commands unchanged.
-- **Validation**: full AGENTS.md set plus file-write, overwrite, symlink, permission, privacy, stdout-identity, and README-audit tests.
+- **Validation**: full AGENTS.md set plus file-write, overwrite, symlink, FIFO/special-file, permission, privacy, stdout-identity, and README-audit tests.
 - **Out of scope**: Context Ledger, `--latest`, Markdown, JSON v1 changes, parent-directory creation, generic writer framework, remote storage, README redesign, Spec Kit/lifecycle changes.
 - **Human decisions**: stop if JSON v1, implicit persistence, network, a new dependency, a generic framework, `--latest`, or README scope beyond current public CLI would be required. Do not apply `agent:ready` or risk labels from Spec Kit.
 
@@ -133,17 +133,20 @@ Behavior:
 
 1. Expand `~`. Do **not** `resolve()` the destination; that would follow a destination symlink.
 2. Inspect the destination with a non-following `lstat`:
-   - symbolic link, including dangling: fail, even if `overwrite` is true
-   - directory: fail, even if `overwrite` is true
-   - regular file and `overwrite` is false: fail
    - missing: allowed
+   - regular file and `overwrite` is false: fail
+   - regular file and `overwrite` is true: allowed
+   - any other existing type (symbolic link including dangling, directory, FIFO, Unix socket, device): fail, even if `overwrite` is true
 3. Parent must already exist and be a directory (`Path.is_dir()` may follow a parent symlink). Do not `mkdir`. Do not chmod the parent.
 4. Create a sibling temporary file in that parent with `os.O_CREAT | os.O_EXCL | os.O_WRONLY` and mode `0o600` on POSIX (`0o666` masked by umask elsewhere).
 5. Write UTF-8 `content`, flush, `fsync`, then `chmod` `0o600` on POSIX.
-6. Publish without following the destination:
-   - `overwrite` false: exclusive publish so an existing destination cannot be replaced. On POSIX, `os.link(temp, dest)` then `unlink(temp)` is sufficient because `link` fails if `dest` exists. On Windows, `os.rename(temp, dest)` is the equivalent because it fails when `dest` exists; do not call `os.replace` in this branch. If the destination exists at publish time, fail and remove `temp`.
-   - `overwrite` true: `os.replace(temp, dest)` so a regular file is replaced atomically. Because step 2 already refused symlinks and directories, replace cannot be aimed at those types unless they appeared after the check; if the destination is no longer a regular file, fail closed and remove `temp` rather than following a symlink.
-7. On any exception after the temporary file exists, `unlink` it (`missing_ok=True`) and leave the destination unchanged.
+6. Publish without following the destination. **Publish is the commit.**
+   - `overwrite` false: exclusive publish so an existing destination cannot be replaced. On POSIX, `os.link(temp, dest)` is the publish step because `link` fails if `dest` exists. On Windows, `os.rename(temp, dest)` is the equivalent because it fails when `dest` exists; do not call `os.replace` in this branch. If that publish call fails, fail and remove `temp`; dest is unchanged.
+   - `overwrite` true: only a regular file observed at step 2 may be replaced. On POSIX, if dest still exists, `os.open(dest, os.O_WRONLY | os.O_NOFOLLOW)`, `fstat` that it is a regular file, then close, then `os.replace(temp, dest)`. If the `O_NOFOLLOW` open or `fstat` shows a non-regular file, fail closed and remove `temp`. On platforms without `O_NOFOLLOW`, skip that extra open and document that sequential `lstat` is the type check. `os.replace` of a missing dest after a vanished regular file is a create and is allowed.
+7. Cleanup:
+   - If publish failed, `unlink` the temp (`missing_ok=True`) and leave dest unchanged.
+   - If publish succeeded, `unlink` the temp best-effort. If that unlink fails, dest already holds the complete new handoff: do not unlink dest, and do not fail the write.
+8. Race contract: CAPT guarantees fail-closed type checks for sequential use. It does not promise to win a TOCTOU race against another process that swaps the destination path between the type check and publish. No portable single syscall both replaces a regular file and refuses a concurrently installed symlink.
 
 Error text is the exception message. Messages use a destination **basename** only when naming the file, never an absolute or parent path:
 
@@ -153,6 +156,7 @@ Error text is the exception message. Messages use a destination **basename** onl
 | existing regular file, no `--force` | `Handoff file already exists: {basename}` |
 | destination is a symbolic link | `Could not write handoff file: path is a symbolic link.` |
 | destination is a directory | `Could not write handoff file: path is a directory.` |
+| destination exists and is any other non-regular type | `Could not write handoff file: path is not a regular file.` |
 | parent missing | `Could not write handoff file: parent directory does not exist.` |
 | parent is not a directory | `Could not write handoff file: parent path is not a directory.` |
 | other `OSError` | `Could not write handoff file: {strerror}` with no path |
@@ -229,7 +233,7 @@ uv run capt trace handoff tests/fixtures/claude_code/synthetic-capture.jsonl
 uv run capt trace handoff tests/fixtures/claude_code/synthetic-capture.jsonl --format json
 ```
 
-Focused validation must cover stdout-unchanged default, text and JSON file bytes matching stdout, refuse-overwrite, `--force` regular-file replace, `--force` without `--output`, symlink/directory/missing-parent failures, no leftover temp or partial destination, POSIX `0600`, privacy exclusions, and README audit against the Typer surface.
+Focused validation must cover stdout-unchanged default, text and JSON file bytes matching stdout, refuse-overwrite, `--force` regular-file replace, `--force` without `--output`, symlink/directory/FIFO/missing-parent failures, failed-publish cleanup, leftover-temp-must-not-rollback after successful publish, POSIX `0600`, privacy exclusions, and README audit against the Typer surface.
 
 ## Complexity Tracking
 

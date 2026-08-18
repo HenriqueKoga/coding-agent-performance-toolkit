@@ -26,13 +26,14 @@ Outcome of publishing one complete UTF-8 representation to `HandoffFileTarget`.
 | Field | Type | Notes |
 | --- | --- | --- |
 | `content` | `str` | Exact stdout representation including trailing newline |
-| `destination` | final path | After a successful exclusive publish or atomic replace |
+| `destination` | final path | After a successful exclusive publish or `--force` replace of a regular file |
 
 Validation:
 
 - Success: destination contains `content` bytes in full; stdout has no handoff body.
-- Failure: destination is unchanged (missing or previous complete file); sibling temporary file is absent.
-- Destination type at publish time must be missing or, with `overwrite`, a regular file. Symbolic links and directories are never valid destinations.
+- Failed publish: destination is unchanged (missing or previous complete file); sibling temporary file is absent.
+- Successful publish with later temp-unlink failure: destination remains the complete new content and is not rolled back.
+- Destination type at the sequential type check must be missing or, with `overwrite`, a regular file. Symbolic links, directories, FIFOs, sockets, devices, and other non-regular existing paths are never valid destinations.
 
 No state machine beyond fail-closed checks before publish. No ledger history.
 
