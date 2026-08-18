@@ -306,7 +306,8 @@ and from comparison JSON. Current handoff `schema_version` is `1`.
 existing bounded path, then copies a compact allowlist into a `TraceHandoff`.
 JSON is the canonical structured representation. Text is the default CLI
 format and reports the same identity, aggregate values, and insight
-presence or absence. Output is stdout-only.
+presence or absence. Stdout is the default. An explicit `--output` path
+persists the same representation to a local file.
 
 The handoff is an evidence extract. It does not invent goals, TODOs,
 recommendations, or a next action. Insights are copied from the existing

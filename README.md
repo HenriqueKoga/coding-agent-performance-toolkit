@@ -2,7 +2,7 @@
 
 Local-first toolkit for measuring and improving coding-agent performance, context usage, and developer workflows.
 
-> **Early-stage project.** CAPT is in pre-alpha. This version can collect raw Claude Code OpenTelemetry envelopes locally and summarize them deterministically. It does not yet produce performance insights or recommendations.
+> **Early-stage project.** CAPT is in pre-alpha. This version can collect raw Claude Code OpenTelemetry envelopes locally, summarize them deterministically, detect selected waste patterns, compare two captures, and export a compact evidence handoff. It does not score sessions or emit recommendations.
 
 ## Why CAPT exists
 
@@ -26,9 +26,12 @@ CAPT is intended to become a local, vendor-independent CLI that helps developers
 - An experimental loopback OTLP HTTP/JSON collector for Claude Code
 - Local JSONL capture files for raw logs and metrics envelopes
 - Deterministic text and JSON summaries of those captures
+- Deterministic insight rules for repeated tool calls, repeated failed tool calls, high tool result volume, high tool failure rate, dominant tool usage, compaction pressure, and subagent usage
+- Comparison of two explicit local captures
+- Compact evidence handoff to stdout or an explicit local file
 - Linting, formatting, type checking, tests, and CI
 
-This version does **not** inspect Claude Code transcripts, persist data in a database, score sessions, or generate insights.
+This version does **not** inspect Claude Code transcripts, persist data in a database, score sessions, or emit recommendations.
 
 ## Quickstart
 
@@ -51,6 +54,8 @@ uv run capt trace list
 uv run capt trace list --limit 10
 uv run capt trace summarize path/to/capture.jsonl
 uv run capt trace summarize --latest
+uv run capt trace compare path/to/baseline.jsonl path/to/candidate.jsonl
+uv run capt trace handoff path/to/capture.jsonl
 ```
 
 `capt doctor` checks essential tools (Python 3.14+ and Git) and optional coding-agent CLIs (Claude Code and Codex). Missing optional tools produce warnings and do not fail the command. Cursor is not checked yet because it does not expose a stable CLI for this diagnosis.
@@ -140,6 +145,30 @@ uv run capt trace summarize \
 
 `--latest` summarizes the newest eligible `.jsonl` file in the default capture directory. Provide either `--latest` or an explicit path, not both. `--format text` is the default. `--format json` writes only JSON to stdout. See [docs/summary-format.md](docs/summary-format.md) for the pre-alpha JSON contract. Use `capt trace list` to inspect available captures before summarizing.
 
+## Compare two captures
+
+`capt trace compare` summarizes two explicit local captures and prints signed integer deltas for a fixed allowlist of aggregates. Provide exactly two paths. `--latest` is not supported. `--format text` is the default. `--format json` writes only JSON to stdout.
+
+```bash
+uv run capt trace compare path/to/baseline.jsonl path/to/candidate.jsonl
+uv run capt trace compare path/to/baseline.jsonl path/to/candidate.jsonl --format json
+```
+
+See [docs/summary-format.md](docs/summary-format.md) for the comparison JSON contract.
+
+## Export a compact handoff
+
+`capt trace handoff` copies a compact allowlist from one explicit local capture into an agent-readable extract. Provide exactly one path. `--latest` is not supported. `--format text` is the default. `--format json` is the canonical structured form. Stdout is the default. `--output PATH` writes the same representation to a local file and prints no handoff body on success. Existing regular files are refused unless `--force` is also provided. Symbolic links, directories, and other non-regular destinations are refused even with `--force`. Missing parent directories are not created.
+
+```bash
+uv run capt trace handoff path/to/capture.jsonl
+uv run capt trace handoff path/to/capture.jsonl --format json
+uv run capt trace handoff path/to/capture.jsonl --output handoff.json
+uv run capt trace handoff path/to/capture.jsonl --format json --output handoff.json --force
+```
+
+See [docs/summary-format.md](docs/summary-format.md) for the handoff JSON contract.
+
 ## Troubleshooting
 
 - **Port already in use.** Choose another loopback port with `--port`, or stop the process bound to `4318`.
@@ -159,6 +188,8 @@ uv run ty check
 uv run capt trace collect claude-code --help
 uv run capt trace list --help
 uv run capt trace summarize --help
+uv run capt trace compare --help
+uv run capt trace handoff --help
 ```
 
 Project documents:
@@ -175,11 +206,10 @@ Project documents:
 
 Planned incrementally, without dates or delivery promises:
 
-1. Deterministic insight rules on top of summaries
-2. Detection of redundant calls, loops, and oversized outputs
-3. A Context Ledger for long-running task continuity
-4. Code search shaped for LLM consumption
-5. Isolated adapters for additional coding agents
+1. Detection of loops and oversized individual outputs
+2. A Context Ledger for long-running task continuity
+3. Code search shaped for LLM consumption
+4. Isolated adapters for additional coding agents
 
 ## Non-goals
 
