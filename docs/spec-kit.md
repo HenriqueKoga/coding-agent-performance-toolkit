@@ -63,7 +63,7 @@ The contract is agent-independent. Cursor's `/speckit-*` skills are the installe
 
 ### Starting the Spec Agent
 
-A human starts the Spec Agent for an existing Agent Task Issue in `needs:design` by running the dedicated `workflow_dispatch` workflow **Agent spec dispatch** from `main` with that Issue number. That workflow validates the Issue and creates one Cursor Cloud Agent in Spec Agent mode against `main`. It requires exactly one lifecycle label (`needs:design`) and exactly one `risk:*` label. It does not change lifecycle or risk labels, does not rewrite the Issue body, does not apply `agent:ready`, and does not run on Issue creation, `needs:design` labeling, or a branch-selected workflow ref.
+A human starts the Spec Agent for an existing Agent Task Issue in `needs:design` by running the dedicated `workflow_dispatch` workflow **Agent spec dispatch** with that Issue number from the default branch. The secret-using job uses GitHub Environment `spec-agent-dispatch`. That workflow validates the Issue and creates one Cursor Cloud Agent in Spec Agent mode against `main`. It requires exactly one lifecycle label (`needs:design`) and exactly one `risk:*` label. It does not change lifecycle or risk labels, does not rewrite the Issue body, does not apply `agent:ready`, and does not run on Issue creation, `needs:design` labeling, or a branch-selected workflow ref.
 
 Manual Cursor Cloud Agent launch remains possible. Implementation dispatch on `agent:ready` is unchanged. See [development.md](development.md).
 
