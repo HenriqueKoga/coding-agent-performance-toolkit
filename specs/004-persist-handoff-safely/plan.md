@@ -43,7 +43,7 @@ Add `--output PATH` and `--force` to the existing `capt trace handoff` command s
 - [x] Public commands and versioned schemas remain compatible, or a version change is explicit
 - [x] No premature registry, ABC, plugin system, or generic framework
 - [x] Human approval identified for scope, dependencies, schema, or lifecycle risk
-- [x] Implementation will enter GitHub as a manual Agent Task Issue, not via `/speckit.implement`
+- [x] Implementation will enter GitHub through existing Issue #58 after human `agent:ready`, not via `/speckit.implement`
 
 ## CAPT design notes
 
