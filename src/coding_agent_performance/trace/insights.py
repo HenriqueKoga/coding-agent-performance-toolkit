@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from coding_agent_performance.trace.report import (
+    CompactionPressure,
     DominantTool,
     FailureRate,
     HighToolFailureRate,
@@ -11,6 +12,7 @@ from coding_agent_performance.trace.report import (
     Insights,
     RepeatedFailedToolCall,
     RepeatedToolCall,
+    SessionStats,
     ToolBreakdown,
     ToolStats,
 )
@@ -23,6 +25,14 @@ HIGH_TOOL_FAILURE_RATE_THRESHOLD_NUMERATOR = 1
 HIGH_TOOL_FAILURE_RATE_THRESHOLD_DENOMINATOR = 2
 DOMINANT_TOOL_MIN_TOTAL_CALLS = 10
 DOMINANT_TOOL_SHARE_THRESHOLD_PERCENT = 60
+COMPACTION_PRESSURE_THRESHOLD = 2
+_EMPTY_SESSIONS = SessionStats(
+    count=0,
+    prompts=0,
+    assistant_responses=0,
+    compactions=0,
+    subagents_completed=0,
+)
 
 
 def detect_repeated_tool_calls(tools: ToolStats) -> tuple[RepeatedToolCall, ...]:
@@ -109,11 +119,25 @@ def detect_dominant_tool(tools: ToolStats) -> DominantTool | None:
     )
 
 
+def detect_compaction_pressure(sessions: SessionStats) -> CompactionPressure | None:
+    """Identify compaction pressure from the existing session aggregate.
+
+    Emits a finding when the capture has at least one session and
+    `sessions.compactions` meets `COMPACTION_PRESSURE_THRESHOLD`. Evidence is
+    the observed count only. Zero sessions produce no finding even if the
+    compaction count meets the threshold.
+    """
+    if sessions.count == 0 or sessions.compactions < COMPACTION_PRESSURE_THRESHOLD:
+        return None
+    return CompactionPressure(compaction_count=sessions.compactions)
+
+
 @dataclass(frozen=True, slots=True)
 class InsightAnalyzer:
     """Produce deterministic insights from provider-neutral summary evidence."""
 
     tools: ToolStats
+    sessions: SessionStats = _EMPTY_SESSIONS
 
     def analyze(self) -> Insights:
         return Insights(
@@ -122,12 +146,13 @@ class InsightAnalyzer:
             high_tool_result_volume=detect_high_tool_result_volume(self.tools),
             high_tool_failure_rate=detect_high_tool_failure_rate(self.tools),
             dominant_tool=detect_dominant_tool(self.tools),
+            compaction_pressure=detect_compaction_pressure(self.sessions),
         )
 
 
-def compute_insights(tools: ToolStats) -> Insights:
+def compute_insights(tools: ToolStats, sessions: SessionStats = _EMPTY_SESSIONS) -> Insights:
     """Compute all deterministic insights for a trace summary."""
-    return InsightAnalyzer(tools=tools).analyze()
+    return InsightAnalyzer(tools=tools, sessions=sessions).analyze()
 
 
 def _breakdowns_by_name(tools: ToolStats) -> Iterable[ToolBreakdown]:

@@ -33,11 +33,11 @@ In scope today:
 - OTLP HTTP/JSON decoding
 - Claude Code allowlist normalization
 - Incremental, deterministic text and JSON summaries, including capture-level tool execution counts and an integer basis-point success rate
-- Deterministic insight rules for repeated tool calls, repeated failed tool calls, high cumulative tool result volume, high tool failure rate, and dominant tool usage
+- Deterministic insight rules for repeated tool calls, repeated failed tool calls, high cumulative tool result volume, high tool failure rate, dominant tool usage, and compaction pressure
 
 Out of scope today:
 
-- Additional insight rules (loops, oversized individual outputs, compactions, subagent analysis)
+- Additional insight rules (loops, oversized individual outputs, subagent analysis)
 - Recommendations, scores, and capture comparison
 - Reading Claude Code transcripts under `~/.claude/projects`
 - Databases, remote HTTP APIs, public network binds, TLS, gRPC, and protobuf
@@ -170,7 +170,7 @@ Likely shape, kept high-level on purpose:
 
 1. **Ingestion.** Isolated adapters configure or read vendor-specific sources and emit raw captures. The Claude Code path is OTLP HTTP/JSON; other agents may differ.
 2. **Normalization.** A provider-independent layer turns raw envelopes into shared records. That layer does not live inside the HTTP receiver.
-3. **Domain.** Deterministic insight rules operate on immutable summary evidence through `InsightAnalyzer`. Repeated tool calls, repeated failed tool calls, high cumulative tool result volume, high tool failure rate, and dominant tool usage are implemented. Future rules may detect loops, redundant calls, oversized individual outputs, and later support a Context Ledger. New insight rules should extend the analyzer or remain small stateless functions; they should not add mutable state to report DTOs.
+3. **Domain.** Deterministic insight rules operate on immutable summary evidence through `InsightAnalyzer`. Repeated tool calls, repeated failed tool calls, high cumulative tool result volume, high tool failure rate, dominant tool usage, and compaction pressure are implemented. Future rules may detect loops, redundant calls, oversized individual outputs, and later support a Context Ledger. New insight rules should extend the analyzer or remain small stateless functions; they should not add mutable state to report DTOs.
 4. **Search.** Code search optimized for LLM consumption, still local.
 5. **Output.** Concise structured reports for humans and agents.
 

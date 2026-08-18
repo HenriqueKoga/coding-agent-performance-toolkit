@@ -7,6 +7,7 @@ import pytest
 from coding_agent_performance.trace.capture import CaptureError
 from coding_agent_performance.trace.rendering import render_json, render_text
 from coding_agent_performance.trace.report import (
+    CompactionPressure,
     FailureRate,
     HighToolFailureRate,
     RepeatedFailedToolCall,
@@ -397,3 +398,98 @@ def test_high_tool_failure_rate_uses_explicit_success_outcome(tmp_path: Path) ->
     ):
         assert marker not in text
         assert marker not in payload
+
+
+def _compaction_records(count: int, *, session_id: str | None = "session-test") -> list[dict[str, object]]:
+    records: list[dict[str, object]] = []
+    for index in range(count):
+        attributes: dict[str, object] = {"event.sequence": index + 1}
+        if session_id is not None:
+            attributes["session.id"] = session_id
+        records.append(log_record(event_name="compaction", attributes=attributes))
+    return records
+
+
+def test_compaction_pressure_absent_below_threshold(tmp_path: Path) -> None:
+    path = tmp_path / "compaction-below.jsonl"
+    path.write_text(
+        json.dumps(envelope(signal="logs", payload=resource_logs(_compaction_records(1)))) + "\n",
+        encoding="utf-8",
+    )
+    summary = summarize_capture(path)
+    assert summary.sessions.compactions == 1
+    assert summary.insights.compaction_pressure is None
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert "Compaction pressure" not in text
+    assert parsed["insights"]["compaction_pressure"] is None
+
+
+def test_compaction_pressure_present_at_threshold(tmp_path: Path) -> None:
+    path = tmp_path / "compaction-at.jsonl"
+    path.write_text(
+        json.dumps(envelope(signal="logs", payload=resource_logs(_compaction_records(2)))) + "\n",
+        encoding="utf-8",
+    )
+    summary = summarize_capture(path)
+    assert summary.sessions.compactions == 2
+    assert summary.insights.compaction_pressure == CompactionPressure(compaction_count=2)
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert "- 2 compactions" in text
+    assert parsed["insights"]["compaction_pressure"] == {"compaction_count": 2}
+
+
+def test_compaction_pressure_present_above_threshold(tmp_path: Path) -> None:
+    path = tmp_path / "compaction-above.jsonl"
+    path.write_text(
+        json.dumps(envelope(signal="logs", payload=resource_logs(_compaction_records(4)))) + "\n",
+        encoding="utf-8",
+    )
+    summary = summarize_capture(path)
+    assert summary.sessions.compactions == 4
+    assert summary.insights.compaction_pressure == CompactionPressure(compaction_count=4)
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert "- 4 compactions" in text
+    assert parsed["insights"]["compaction_pressure"] == {"compaction_count": 4}
+
+
+def test_compaction_pressure_omits_identifiers_and_payloads(tmp_path: Path) -> None:
+    records = [
+        log_record(
+            event_name="compaction",
+            attributes={
+                "session.id": "secret-session-id",
+                "event.sequence": index + 1,
+                "prompt.id": "secret-prompt-id",
+            },
+        )
+        for index in range(2)
+    ]
+    path = tmp_path / "compaction-privacy.jsonl"
+    path.write_text(json.dumps(envelope(signal="logs", payload=resource_logs(records))) + "\n", encoding="utf-8")
+    summary = summarize_capture(path)
+    text = render_text(summary)
+    payload = render_json(summary)
+    for marker in ("secret-session-id", "secret-prompt-id", "/tmp/", "recommend", "degraded"):
+        assert marker not in text
+        assert marker not in payload
+    parsed = json.loads(payload)
+    assert parsed["insights"]["compaction_pressure"] == {"compaction_count": 2}
+
+
+def test_compaction_pressure_absent_without_session_identifiers(tmp_path: Path) -> None:
+    path = tmp_path / "compaction-no-session.jsonl"
+    path.write_text(
+        json.dumps(envelope(signal="logs", payload=resource_logs(_compaction_records(2, session_id=None)))) + "\n",
+        encoding="utf-8",
+    )
+    summary = summarize_capture(path)
+    assert summary.sessions.count == 0
+    assert summary.sessions.compactions == 2
+    assert summary.insights.compaction_pressure is None
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert "Compaction pressure" not in text
+    assert parsed["insights"]["compaction_pressure"] is None

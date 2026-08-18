@@ -5,7 +5,7 @@ from pathlib import Path
 from coding_agent_performance.trace.aggregation import IncrementalSummarizer
 from coding_agent_performance.trace.capture import CaptureEnvelope
 from coding_agent_performance.trace.insights import HIGH_TOOL_RESULT_VOLUME_THRESHOLD
-from coding_agent_performance.trace.records import ActivityMeasurement, ToolExecution
+from coding_agent_performance.trace.records import ActivityMeasurement, NamedLifecycleEvent, ToolExecution
 from coding_agent_performance.trace.rendering import (
     escape_filename,
     format_utc_timestamp,
@@ -71,6 +71,23 @@ def _add_tools(summarizer: IncrementalSummarizer, *records: ToolExecution) -> No
 def _finish_tools(*records: ToolExecution, filename: str) -> TraceSummary:
     summarizer = IncrementalSummarizer(filename=filename)
     _add_tools(summarizer, *records)
+    return summarizer.finish(Path(filename))
+
+
+def _compaction_event(event_sequence: int, *, session_id: str | None = "session-test") -> NamedLifecycleEvent:
+    return NamedLifecycleEvent(name="compaction", session_id=session_id, event_sequence=event_sequence)
+
+
+def _finish_records(*records: ToolExecution | NamedLifecycleEvent, filename: str) -> TraceSummary:
+    summarizer = IncrementalSummarizer(filename=filename)
+    for record in records:
+        summarizer.add(
+            _envelope("logs", resource_logs([])),
+            (record,),
+            log_count=1,
+            metric_count=0,
+            unsupported=0,
+        )
     return summarizer.finish(Path(filename))
 
 
@@ -150,11 +167,13 @@ def test_json_allowlist_keeps_insight_keys() -> None:
         "high_tool_result_volume",
         "high_tool_failure_rate",
         "dominant_tool",
+        "compaction_pressure",
     }
     assert insights["repeated_failed_tool_calls"] == []
     assert insights["high_tool_result_volume"] == []
     assert insights["high_tool_failure_rate"] == []
     assert insights["dominant_tool"] is None
+    assert insights["compaction_pressure"] is None
 
 
 def test_text_usage_source_labels() -> None:
@@ -740,6 +759,7 @@ def test_zero_tool_calls_render_explicit_safe_rate() -> None:
         "high_tool_result_volume": [],
         "high_tool_failure_rate": [],
         "dominant_tool": None,
+        "compaction_pressure": None,
     }
 
 
@@ -807,6 +827,7 @@ def test_mixed_calls_render_exact_counts_and_stable_rate() -> None:
         "high_tool_result_volume": [],
         "high_tool_failure_rate": [],
         "dominant_tool": None,
+        "compaction_pressure": None,
     }
 
 
@@ -1186,3 +1207,167 @@ def test_dominant_tool_contains_only_safe_evidence() -> None:
     assert isinstance(finding["call_count"], int)
     assert isinstance(finding["total_calls"], int)
     assert isinstance(finding["share_percent"], int)
+
+
+def test_compaction_pressure_appears_in_text() -> None:
+    text = render_text(
+        _finish_records(
+            _compaction_event(1),
+            _compaction_event(2),
+            filename="compaction-insights.jsonl",
+        )
+    )
+    assert "Insights" in text
+    assert "Compaction pressure" in text
+    assert "- 2 compactions" in text
+
+
+def test_compaction_pressure_not_present_when_zero() -> None:
+    summary = _finish_tools(
+        _tool_execution("Read", success=True, event_sequence=1),
+        filename="compaction-zero.jsonl",
+    )
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert "Compaction pressure" not in text
+    assert parsed["insights"]["compaction_pressure"] is None
+
+
+def test_compaction_pressure_not_present_below_threshold() -> None:
+    summary = _finish_records(_compaction_event(1), filename="compaction-below.jsonl")
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert "Compaction pressure" not in text
+    assert parsed["insights"]["compaction_pressure"] is None
+
+
+def test_compaction_pressure_not_present_without_session_identifiers() -> None:
+    summary = _finish_records(
+        _compaction_event(1, session_id=None),
+        _compaction_event(2, session_id=None),
+        filename="compaction-no-session.jsonl",
+    )
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert summary.sessions.count == 0
+    assert summary.sessions.compactions == 2
+    assert "Compaction pressure" not in text
+    assert parsed["insights"]["compaction_pressure"] is None
+
+
+def test_compaction_pressure_at_threshold_in_json_output() -> None:
+    parsed = json.loads(
+        render_json(
+            _finish_records(
+                _compaction_event(1),
+                _compaction_event(2),
+                filename="compaction-at-threshold.jsonl",
+            )
+        )
+    )
+    assert parsed["insights"]["compaction_pressure"] == {"compaction_count": 2}
+
+
+def test_compaction_pressure_above_threshold_in_json_output() -> None:
+    parsed = json.loads(
+        render_json(
+            _finish_records(
+                _compaction_event(1),
+                _compaction_event(2),
+                _compaction_event(3),
+                filename="compaction-above.jsonl",
+            )
+        )
+    )
+    assert parsed["insights"]["compaction_pressure"] == {"compaction_count": 3}
+
+
+def test_compaction_pressure_text_and_json_are_deterministic() -> None:
+    summary = _finish_records(
+        _compaction_event(1),
+        _compaction_event(2),
+        _compaction_event(3),
+        filename="compaction-deterministic.jsonl",
+    )
+    text = render_text(summary)
+    payload = render_json(summary)
+    assert render_text(summary) == text
+    assert render_json(summary) == payload
+    parsed = json.loads(payload)
+    assert "- 3 compactions" in text
+    assert parsed["insights"]["compaction_pressure"] == {"compaction_count": 3}
+
+
+def test_compaction_pressure_coexists_with_existing_insights() -> None:
+    summary = _finish_records(
+        *(_tool_execution("Read", success=True, event_sequence=i, result_size_bytes=24576) for i in range(8)),
+        *(
+            _tool_execution(
+                "Bash",
+                success=False,
+                event_sequence=i + 8,
+                error_type="ShellError",
+                result_size_bytes=0,
+            )
+            for i in range(3)
+        ),
+        _compaction_event(11),
+        _compaction_event(12),
+        filename="compaction-coexist.jsonl",
+    )
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert "- Read: 8 calls" in text
+    assert "- Bash: 3 calls" in text
+    assert "- Bash: 3 failures" in text
+    assert "- Read: 196608 result bytes" in text
+    assert "- Bash: 3 failed of 3 calls (1/1)" in text
+    assert "- Read: 8/11 calls (72%)" in text
+    assert "- 2 compactions" in text
+    assert parsed["insights"]["repeated_tool_calls"] == [
+        {"tool_name": "Bash", "call_count": 3},
+        {"tool_name": "Read", "call_count": 8},
+    ]
+    assert parsed["insights"]["repeated_failed_tool_calls"] == [{"tool_name": "Bash", "failure_count": 3}]
+    assert parsed["insights"]["high_tool_result_volume"] == [{"tool_name": "Read", "result_bytes": 196608}]
+    assert parsed["insights"]["high_tool_failure_rate"] == [
+        {
+            "tool_name": "Bash",
+            "failed_calls": 3,
+            "total_calls": 3,
+            "failure_rate": {"numerator": 1, "denominator": 1},
+        }
+    ]
+    assert parsed["insights"]["dominant_tool"] == {
+        "tool_name": "Read",
+        "call_count": 8,
+        "total_calls": 11,
+        "share_percent": 72,
+    }
+    assert parsed["insights"]["compaction_pressure"] == {"compaction_count": 2}
+
+
+def test_compaction_pressure_contains_only_safe_evidence() -> None:
+    summary = _finish_records(
+        _compaction_event(1, session_id="secret-session-id"),
+        _compaction_event(2, session_id="secret-session-id"),
+        filename="compaction-privacy.jsonl",
+    )
+    text = render_text(summary)
+    payload = render_json(summary)
+    _assert_markers_absent(
+        text,
+        payload,
+        "secret-session-id",
+        "secret-prompt-id",
+        "/tmp/",
+        "context window",
+        "should compact less",
+        "degraded",
+        "recommend",
+    )
+    parsed = json.loads(payload)
+    finding = parsed["insights"]["compaction_pressure"]
+    assert finding is not None
+    assert set(finding.keys()) == {"compaction_count"}
+    assert isinstance(finding["compaction_count"], int)

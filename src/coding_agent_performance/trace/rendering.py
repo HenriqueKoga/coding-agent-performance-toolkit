@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from coding_agent_performance.trace.report import (
+    CompactionPressure,
     DominantTool,
     DurationStats,
     Insights,
@@ -177,6 +178,7 @@ def _insights_dict(insights: Insights) -> dict[str, object]:
             for finding in insights.high_tool_failure_rate
         ],
         "dominant_tool": _dominant_tool_dict(insights.dominant_tool),
+        "compaction_pressure": _compaction_pressure_dict(insights.compaction_pressure),
     }
 
 
@@ -189,6 +191,12 @@ def _dominant_tool_dict(finding: DominantTool | None) -> dict[str, str | int] | 
         "total_calls": finding.total_calls,
         "share_percent": finding.share_percent,
     }
+
+
+def _compaction_pressure_dict(finding: CompactionPressure | None) -> dict[str, int] | None:
+    if finding is None:
+        return None
+    return {"compaction_count": finding.compaction_count}
 
 
 def render_json(summary: TraceSummary) -> str:
@@ -338,6 +346,13 @@ def _insight_lines(insights: Insights) -> list[str]:
             lines,
             "Dominant tool",
             (f"- {finding.tool_name}: {finding.call_count}/{finding.total_calls} calls ({finding.share_percent}%)",),
+        )
+    if insights.compaction_pressure is not None:
+        finding = insights.compaction_pressure
+        _append_insight_group(
+            lines,
+            "Compaction pressure",
+            (f"- {finding.compaction_count} compactions",),
         )
     return lines
 
