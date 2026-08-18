@@ -3,7 +3,7 @@
 This module is repository automation, not part of the CAPT runtime package.
 It validates `agent:ready` Issue preconditions and builds an idempotent
 Cursor Cloud Agents API v1 create request. It never mutates lifecycle or
-risk labels.
+risk labels and does not depend on rewriting the Issue body.
 """
 
 import argparse
@@ -27,6 +27,14 @@ from agent_lifecycle import (
     GitHubApiResponse,
     github_http_status_from_stderr,
     is_retryable_github_http_status,
+)
+from agent_spec import (
+    ApprovedSpec,
+    IssueComment,
+    SpecApprovalError,
+    comments_from_mapping,
+    read_issue_comments,
+    resolve_approved_spec,
 )
 from cursor_agents import (
     CURSOR_AGENTS_URL,
@@ -181,10 +189,18 @@ def read_dispatch_issue(
     raise DispatchError(_rest_read_failure_message(issue_number, last_status, attempt))
 
 
-def plan_dispatch(added_label: str, issue: DispatchIssue) -> DispatchPlan:
+def plan_dispatch(
+    added_label: str,
+    issue: DispatchIssue,
+    comments: Sequence[IssueComment] = (),
+) -> DispatchPlan:
     """Validate Issue preconditions and build the Cursor create request."""
     validate_dispatch_preconditions(added_label, issue)
-    request = build_create_agent_request(issue.number)
+    try:
+        approved = resolve_approved_spec(issue.number, comments)
+    except SpecApprovalError as exc:
+        raise DispatchError(str(exc)) from None
+    request = build_create_agent_request(issue.number, approved)
     return DispatchPlan(
         issue_number=issue.number,
         request=request,
@@ -205,7 +221,7 @@ def validate_dispatch_preconditions(added_label: str, issue: DispatchIssue) -> N
     _require_single_risk(issue.number, issue.labels)
 
 
-def build_prompt(issue_number: int) -> str:
+def build_prompt(issue_number: int, approved: ApprovedSpec | None = None) -> str:
     _require_positive_issue_number(issue_number)
     return (
         f"Implement GitHub Issue #{issue_number} in {OWNER_REPO}.\n"
@@ -213,7 +229,8 @@ def build_prompt(issue_number: int) -> str:
         "Before making changes:\n"
         "- read AGENTS.md;\n"
         "- read the relevant repository documentation;\n"
-        f"- read GitHub Issue #{issue_number} and treat it as the complete task specification.\n"
+        f"- read GitHub Issue #{issue_number} as the original feature brief;\n"
+        f"{_prompt_specification_guidance(issue_number, approved)}"
         "\n"
         "Do not expand scope.\n"
         "Do not mutate lifecycle or risk labels.\n"
@@ -225,6 +242,27 @@ def build_prompt(issue_number: int) -> str:
     )
 
 
+def _prompt_specification_guidance(issue_number: int, approved: ApprovedSpec | None) -> str:
+    if approved is None:
+        return (
+            "- no approved-spec metadata was found for this Issue. Do not infer a specs/ "
+            "directory from free-form Issue or PR prose. Treat the Issue body as the task specification.\n"
+        )
+    if approved.issue_number != issue_number:
+        raise DispatchError("approved-spec comment issue does not match the Agent Task Issue")
+    return (
+        "- read the approved specification named by the managed Issue comment:\n"
+        f"  - Specification PR: #{approved.pull_request_number}\n"
+        f"  - Canonical spec: {approved.spec_path}\n"
+        f"  - Plan: {approved.artifact_path('plan.md')}\n"
+        f"  - Tasks: {approved.artifact_path('tasks.md')}\n"
+        f"  - Analysis: {approved.artifact_path('analyze.md')}\n"
+        "The Issue body is the original request. Spec Kit artifacts are the approved "
+        "requirements, design, and tasks. When they conflict, the merged spec.md is authoritative.\n"
+        "Do not create a second implementation Issue for this Agent Task.\n"
+    )
+
+
 def build_agent_id(issue_number: int) -> str:
     """Return a deterministic `bc-<uuid>` derived from repository + Issue identity."""
     _require_positive_issue_number(issue_number)
@@ -232,11 +270,14 @@ def build_agent_id(issue_number: int) -> str:
     return f"bc-{uuid.uuid5(_AGENT_ID_NAMESPACE, issue_url)}"
 
 
-def build_create_agent_request(issue_number: int) -> dict[str, object]:
+def build_create_agent_request(
+    issue_number: int,
+    approved: ApprovedSpec | None = None,
+) -> dict[str, object]:
     _require_positive_issue_number(issue_number)
     return {
         "agentId": build_agent_id(issue_number),
-        "prompt": {"text": build_prompt(issue_number)},
+        "prompt": {"text": build_prompt(issue_number, approved)},
         "name": f"Issue #{issue_number}",
         "repos": [{"url": REPOSITORY_URL, "startingRef": STARTING_REF}],
         "mode": "agent",
@@ -443,6 +484,7 @@ def _build_parser() -> argparse.ArgumentParser:
     plan = subparsers.add_parser("plan", help="Validate preconditions and print the Cursor request JSON.")
     plan.add_argument("--event-file", type=Path, required=True)
     plan.add_argument("--issue-json", required=True)
+    plan.add_argument("--comments-json", default="[]")
 
     submit = subparsers.add_parser("submit", help="POST a planned Cursor create request.")
     submit.add_argument("--issue", dest="issue_number", type=int, required=True)
@@ -463,7 +505,7 @@ def _run_parse_event(event_file: Path, stdout: TextIO) -> int:
     return 0
 
 
-def _run_plan(event_file: Path, issue_json: str, stdout: TextIO) -> int:
+def _run_plan(event_file: Path, issue_json: str, comments_json: str, stdout: TextIO) -> int:
     event = load_labeled_issue_event(event_file)
     parsed = _load_json_value(issue_json)
     if not isinstance(parsed, dict):
@@ -471,7 +513,11 @@ def _run_plan(event_file: Path, issue_json: str, stdout: TextIO) -> int:
     issue = dispatch_issue_from_mapping(parsed, "issue JSON")
     if issue.number != event.issue.number:
         raise DispatchError("issue JSON number does not match the GitHub event")
-    plan = plan_dispatch(event.added_label, issue)
+    try:
+        comments = comments_from_mapping(_load_json_value(comments_json), "comments")
+    except SpecApprovalError as exc:
+        raise DispatchError(str(exc)) from None
+    plan = plan_dispatch(event.added_label, issue, comments)
     print(json.dumps(plan.to_json_dict(), allow_nan=False), file=stdout)
     return 0
 
@@ -485,10 +531,16 @@ def _run_submit(issue_number: int, request_json: str, stdout: TextIO) -> int:
 
 def _run_dispatch(event_file: Path, repo_arg: str | None, stdout: TextIO) -> int:
     event = load_labeled_issue_event(event_file)
-    issue = read_dispatch_issue(_repository_from_cli(repo_arg), event.issue.number)
+    repository = _repository_from_cli(repo_arg)
+    issue = read_dispatch_issue(repository, event.issue.number)
     if issue.number != event.issue.number:
         raise DispatchError("GitHub REST issue number does not match the GitHub event")
-    plan = plan_dispatch(event.added_label, issue)
+    validate_dispatch_preconditions(event.added_label, issue)
+    try:
+        comments = read_issue_comments(repository, issue.number, run_api=_run_gh_api)
+    except SpecApprovalError as exc:
+        raise DispatchError(str(exc)) from None
+    plan = plan_dispatch(event.added_label, issue, comments)
     result = submit_create_agent(plan.issue_number, plan.request, _api_key_from_env())
     print(json.dumps(result.to_json_dict(), allow_nan=False), file=stdout)
     return 0
@@ -503,7 +555,7 @@ def main(argv: Sequence[str] | None = None, stdout: TextIO | None = None) -> int
             case "parse-event":
                 return _run_parse_event(args.event_file, output)
             case "plan":
-                return _run_plan(args.event_file, args.issue_json, output)
+                return _run_plan(args.event_file, args.issue_json, args.comments_json, output)
             case "submit":
                 return _run_submit(args.issue_number, args.request_json, output)
             case "dispatch":

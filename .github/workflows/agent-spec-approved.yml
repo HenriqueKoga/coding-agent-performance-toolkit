@@ -1,0 +1,41 @@
+name: Agent spec approved
+
+on:
+  pull_request:
+    types:
+      - closed
+
+concurrency:
+  group: agent-spec-approved-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  record:
+    name: Record approved specification
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out merged specification
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Record the approved specification without rewriting the Issue body
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          python .github/scripts/agent_spec.py handoff --event-file "${GITHUB_EVENT_PATH}" --repo-root .

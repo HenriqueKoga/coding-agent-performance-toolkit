@@ -809,3 +809,11 @@ def test_spec_review_pull_request_template_opts_out_of_lifecycle() -> None:
     assert has_lifecycle_opt_out(template) is True
     with pytest.raises(LifecycleError, match="opts out of Agent Task lifecycle"):
         parse_linked_issue_number(template)
+
+
+def test_spec_review_template_with_capt_spec_still_opts_out_of_lifecycle() -> None:
+    template = Path(".github/spec-review-pull-request.md").read_text(encoding="utf-8")
+    assert "<!-- capt-spec:v1" in template
+    assert has_lifecycle_opt_out(template) is True
+    with pytest.raises(LifecycleError, match="opts out of Agent Task lifecycle"):
+        parse_linked_issue_number(template)
