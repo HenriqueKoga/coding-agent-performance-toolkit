@@ -39,6 +39,8 @@ SPEC_HANDOFF_LIFECYCLES: tuple[str, ...] = (NEEDS_DESIGN, NEEDS_HUMAN_REVIEW)
 REQUIRED_BASE_REF = "main"
 SPEC_METADATA_VERSION = "v1"
 APPROVED_MARKER_VERSION = "v1"
+GITHUB_ACTIONS_BOT_LOGIN = "github-actions[bot]"
+GITHUB_ACTIONS_BOT_TYPE = "Bot"
 CANONICAL_ARTIFACTS = ("spec.md", "plan.md", "tasks.md", "analyze.md")
 MAX_COMMENT_PAGES = 10
 COMMENTS_PER_PAGE = 100
@@ -102,6 +104,8 @@ class MergedPullRequestEvent:
 class IssueComment:
     comment_id: int
     body: str
+    user_login: str
+    user_type: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -251,17 +255,12 @@ def parse_approved_spec(body: str) -> ApprovedSpec | None:
 def resolve_approved_spec(issue_number: int, comments: Sequence[IssueComment]) -> ApprovedSpec | None:
     """Return the single managed approved spec for an Issue, or None when none exists."""
     _require_positive_issue_number(issue_number)
-    managed: list[ApprovedSpec] = []
-    for comment in comments:
-        parsed = parse_approved_spec(comment.body)
-        if parsed is None:
-            continue
-        managed.append(parsed)
+    managed = _trusted_approved_comments(comments)
     if not managed:
         return None
     if len(managed) > 1:
         raise SpecApprovalError(f"Issue #{issue_number} has multiple capt-spec-approved comments")
-    approved = managed[0]
+    approved = managed[0][1]
     if approved.issue_number != issue_number:
         raise SpecApprovalError("approved-spec comment issue does not match the Agent Task Issue")
     return approved
@@ -524,13 +523,7 @@ def read_issue_comments(
             break
     comments: list[IssueComment] = []
     for item in items:
-        comment_id = item.get("id")
-        body = item.get("body")
-        if not isinstance(comment_id, int) or isinstance(comment_id, bool) or comment_id <= 0:
-            raise SpecApprovalError(f"GitHub REST issue #{issue_number} comments are invalid")
-        if not isinstance(body, str):
-            raise SpecApprovalError(f"GitHub REST issue #{issue_number} comments are invalid")
-        comments.append(IssueComment(comment_id=comment_id, body=body))
+        comments.append(_comment_from_mapping(item, f"GitHub REST issue #{issue_number} comments"))
     return tuple(comments)
 
 
@@ -599,13 +592,7 @@ def comments_from_mapping(value: object, what: str) -> tuple[IssueComment, ...]:
     for item in value:
         if not isinstance(item, dict):
             raise SpecApprovalError(f"{what} are invalid")
-        comment_id = item.get("id")
-        body = item.get("body")
-        if not isinstance(comment_id, int) or isinstance(comment_id, bool) or comment_id <= 0:
-            raise SpecApprovalError(f"{what} are invalid")
-        if not isinstance(body, str):
-            raise SpecApprovalError(f"{what} are invalid")
-        comments.append(IssueComment(comment_id=comment_id, body=body))
+        comments.append(_comment_from_mapping(item, what))
     return tuple(comments)
 
 
@@ -620,19 +607,50 @@ def _plan_issue_labels(issue_number: int, labels: Sequence[str]) -> tuple[tuple[
 
 
 def _managed_comment(issue_number: int, comments: Sequence[IssueComment]) -> IssueComment | None:
-    managed: list[IssueComment] = []
+    managed = _trusted_approved_comments(comments)
+    if not managed:
+        return None
+    if len(managed) > 1:
+        raise SpecApprovalError(f"Issue #{issue_number} has multiple capt-spec-approved comments")
+    comment, parsed = managed[0]
+    if parsed.issue_number != issue_number:
+        raise SpecApprovalError("approved-spec comment issue does not match the Agent Task Issue")
+    return comment
+
+
+def _trusted_approved_comments(
+    comments: Sequence[IssueComment],
+) -> tuple[tuple[IssueComment, ApprovedSpec], ...]:
+    managed: list[tuple[IssueComment, ApprovedSpec]] = []
     for comment in comments:
+        if not _is_trusted_automation_comment(comment):
+            continue
         parsed = parse_approved_spec(comment.body)
         if parsed is None:
             continue
-        if parsed.issue_number != issue_number:
-            raise SpecApprovalError("approved-spec comment issue does not match the Agent Task Issue")
-        managed.append(comment)
-    if len(managed) > 1:
-        raise SpecApprovalError(f"Issue #{issue_number} has multiple capt-spec-approved comments")
-    if not managed:
-        return None
-    return managed[0]
+        managed.append((comment, parsed))
+    return tuple(managed)
+
+
+def _is_trusted_automation_comment(comment: IssueComment) -> bool:
+    return comment.user_login == GITHUB_ACTIONS_BOT_LOGIN and comment.user_type == GITHUB_ACTIONS_BOT_TYPE
+
+
+def _comment_from_mapping(item: Mapping[str, object], what: str) -> IssueComment:
+    comment_id = item.get("id")
+    body = item.get("body")
+    user = item.get("user")
+    if not isinstance(comment_id, int) or isinstance(comment_id, bool) or comment_id <= 0:
+        raise SpecApprovalError(f"{what} are invalid")
+    if not isinstance(body, str):
+        raise SpecApprovalError(f"{what} are invalid")
+    if not isinstance(user, dict):
+        raise SpecApprovalError(f"{what} are invalid")
+    login = user.get("login")
+    user_type = user.get("type")
+    if not isinstance(login, str) or not login or not isinstance(user_type, str) or not user_type:
+        raise SpecApprovalError(f"{what} are invalid")
+    return IssueComment(comment_id=comment_id, body=body, user_login=login, user_type=user_type)
 
 
 def _parse_metadata_fields(block: str, what: str) -> dict[str, str]:
