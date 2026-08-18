@@ -103,14 +103,16 @@ GitHub Actions maintains Agent Task labels after a human has applied `agent:read
 
 Applying `agent:ready` to an open Issue starts a dedicated dispatch workflow. That workflow validates the Issue, then creates exactly one Cursor Cloud Agent through `POST https://api.cursor.com/v1/agents`. It does not change lifecycle or risk labels. `agent:working` still happens only when the implementation Draft PR opens.
 
-A pull request whose body contains a standalone `<!-- capt-lifecycle: ignore -->` line is intentionally outside the Agent Task lifecycle. The lifecycle workflow exits successfully without reading or mutating Issue lifecycle or risk labels. This opt-out does not skip CI, Codex, branch protection, or other repository checks. Do not infer opt-out from `docs:` titles, `spec/` branches, changed paths, draft status, or the absence of `Closes #<issue>`. Specification and documentation review PRs should use this marker plus `Related to #<issue>` instead of `Closes #<issue>`.
+A pull request whose body contains a standalone `<!-- capt-lifecycle: ignore -->` line, and no standalone `Closes #<issue>` line, is intentionally outside the Agent Task lifecycle. The lifecycle workflow exits successfully without reading or mutating Issue lifecycle or risk labels. This opt-out does not skip CI, Codex, branch protection, or other repository checks. Do not infer opt-out from `docs:` titles, `spec/` branches, changed paths, draft status, or the absence of `Closes #<issue>`. Specification and documentation review PRs should use this marker plus `Related to #<issue>` instead of `Closes #<issue>`. Combining the opt-out marker with any standalone `Closes #<issue>` line fails closed.
+
+A standalone `<!-- capt-lifecycle: ... -->` comment is recognized as the lifecycle namespace. The value must be exactly `ignore`. Any other value, an empty value, or a malformed namespace comment fails closed.
 
 A pull request whose body contains exactly one `Closes #<issue>` line, matching the pull-request template, and does not contain the opt-out marker:
 
 - moves the linked Issue from `agent:ready` to `agent:working` when the PR is opened, and copies that Issue's single `risk:*` label to the PR
 - moves the linked Issue from `agent:working` to `needs:human-review` when the PR is marked ready for review
 
-Unexpected lifecycle states, including a missing lifecycle label, produce a diagnostic and leave labels unchanged. Invalid risk classification, conflicting labels, ambiguous `Closes #<issue>` links, and invalid or ambiguous standalone `<!-- capt-lifecycle: ... -->` markers still fail.
+Unexpected lifecycle states, including a missing lifecycle label, produce a diagnostic and leave labels unchanged. Invalid risk classification, conflicting labels, ambiguous `Closes #<issue>` links, a combined opt-out marker and `Closes #<issue>` link, and invalid or ambiguous standalone `<!-- capt-lifecycle: ... -->` markers still fail.
 
 `agent:ready` is never applied automatically. Risk classification is never inferred. Merged PRs close Issues through GitHub's normal `Closes #N` behavior.
 

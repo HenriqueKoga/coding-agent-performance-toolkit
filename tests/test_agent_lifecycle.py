@@ -123,12 +123,30 @@ def test_ambiguous_lifecycle_marker_with_ignore_and_other_directive_fails() -> N
         parse_linked_issue_number(body)
 
 
-def test_opt_out_wins_over_closes_link_and_does_not_expose_issue() -> None:
+def test_empty_or_malformed_lifecycle_marker_fails_closed() -> None:
+    for body in (
+        "<!-- capt-lifecycle: -->\nRelated to #36\n",
+        "<!-- capt-lifecycle -->\nRelated to #36\n",
+        "<!-- capt-lifecycle: IGNORE -->\nRelated to #36\n",
+        "<!-- capt-lifecycle skip -->\nRelated to #36\n",
+        "<!-- capt-lifecycle: ignore extra -->\nRelated to #36\n",
+    ):
+        with pytest.raises(LifecycleError, match="invalid or ambiguous capt-lifecycle marker") as exc_info:
+            has_lifecycle_opt_out(body)
+        assert "36" not in str(exc_info.value)
+        assert SECRET not in str(exc_info.value)
+        with pytest.raises(LifecycleError, match="invalid or ambiguous capt-lifecycle marker"):
+            parse_linked_issue_number(body)
+
+
+def test_opt_out_combined_with_closes_fails_closed_without_exposing_issue() -> None:
     body = f"{LIFECYCLE_OPT_OUT_MARKER}\n\nCloses #36\n"
-    assert has_lifecycle_opt_out(body) is True
-    with pytest.raises(LifecycleError, match="opts out of Agent Task lifecycle") as exc_info:
-        parse_linked_issue_number(body)
+    with pytest.raises(LifecycleError, match="combines capt-lifecycle opt-out with a Closes #<issue> link") as exc_info:
+        has_lifecycle_opt_out(body)
     assert "36" not in str(exc_info.value)
+    assert SECRET not in str(exc_info.value)
+    with pytest.raises(LifecycleError, match="combines capt-lifecycle opt-out with a Closes #<issue> link"):
+        parse_linked_issue_number(body)
 
 
 def test_opened_ready_issue_moves_to_working_and_copies_risk() -> None:
@@ -302,8 +320,18 @@ def test_cli_invalid_marker_fails_without_planning(tmp_path: Path, capsys: pytes
     )
 
 
-def test_cli_opt_out_plan_does_not_mutate_linked_issue(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    event = _event_file(tmp_path, "opened", f"{LIFECYCLE_OPT_OUT_MARKER}\nCloses #36\n")
+def test_cli_opt_out_combined_with_closes_fails_without_planning(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    event = _event_file(tmp_path, "opened", f"{LIFECYCLE_OPT_OUT_MARKER}\nCloses #36\nsecret {SECRET}\n")
+    stdout = StringIO()
+    assert main(["opt-out", "--event-file", str(event)], stdout=stdout) == 1
+    captured = capsys.readouterr()
+    assert stdout.getvalue() == ""
+    assert "combines capt-lifecycle opt-out with a Closes #<issue> link" in captured.err
+    assert "agent:working" not in captured.err
+    assert SECRET not in captured.err
+    assert "36" not in captured.err
     stdout = StringIO()
     assert (
         main(
@@ -322,8 +350,7 @@ def test_cli_opt_out_plan_does_not_mutate_linked_issue(tmp_path: Path, capsys: p
     )
     captured = capsys.readouterr()
     assert stdout.getvalue() == ""
-    assert "opts out of Agent Task lifecycle" in captured.err
-    assert "agent:working" not in captured.err
+    assert "combines capt-lifecycle opt-out with a Closes #<issue> link" in captured.err
     assert "36" not in captured.err
 
 

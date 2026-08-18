@@ -46,9 +46,14 @@ GITHUB_REST_READ_RETRY_DELAY_SECONDS = 2.0
 RETRYABLE_GITHUB_HTTP_STATUSES = frozenset({500, 502, 503, 504})
 
 LIFECYCLE_OPT_OUT_MARKER = "<!-- capt-lifecycle: ignore -->"
+LIFECYCLE_OPT_OUT_VALUE = "ignore"
 
 _CLOSES_LINE = re.compile(r"^[ \t]*Closes #(\d+)[ \t]*$", re.MULTILINE)
-_LIFECYCLE_MARKER_LINE = re.compile(r"^[ \t]*(<!-- capt-lifecycle: .+? -->)[ \t]*$", re.MULTILINE)
+_LIFECYCLE_NAMESPACE_LINE = re.compile(
+    r"^[ \t]*<!--[ \t]*(capt-lifecycle(?:[ \t:].*?)?)[ \t]*-->[ \t]*$",
+    re.MULTILINE,
+)
+_LIFECYCLE_DIRECTIVE = re.compile(r"^capt-lifecycle:[ \t]*(.*?)[ \t]*$")
 _GITHUB_HTTP_STATUS = re.compile(r"\bHTTP (\d{3})\b")
 
 
@@ -95,13 +100,21 @@ class GitHubApiResponse:
 def has_lifecycle_opt_out(body: str) -> bool:
     """Return True when the pull-request body opts out of Agent Task lifecycle."""
     normalized = _normalize_pr_body(body)
-    directives = tuple(match.strip() for match in _LIFECYCLE_MARKER_LINE.findall(normalized))
-    if not directives:
+    payloads = tuple(match.strip() for match in _LIFECYCLE_NAMESPACE_LINE.findall(normalized))
+    if not payloads:
         return False
-    unique_directives = tuple(dict.fromkeys(directives))
-    if unique_directives == (LIFECYCLE_OPT_OUT_MARKER,):
-        return True
-    raise LifecycleError("pull request body contains an invalid or ambiguous capt-lifecycle marker")
+    if any(_lifecycle_directive_value(payload) != LIFECYCLE_OPT_OUT_VALUE for payload in payloads):
+        raise LifecycleError("pull request body contains an invalid or ambiguous capt-lifecycle marker")
+    if _CLOSES_LINE.search(normalized) is not None:
+        raise LifecycleError("pull request body combines capt-lifecycle opt-out with a Closes #<issue> link")
+    return True
+
+
+def _lifecycle_directive_value(payload: str) -> str | None:
+    match = _LIFECYCLE_DIRECTIVE.fullmatch(payload)
+    if match is None:
+        return None
+    return match.group(1)
 
 
 def parse_linked_issue_number(body: str) -> int:

@@ -164,8 +164,9 @@ Those PRs should:
 
 - include a standalone `<!-- capt-lifecycle: ignore -->` line in the pull-request body
 - link the operational Issue with `Related to #<issue>` rather than `Closes #<issue>`
+- not combine the opt-out marker with any `Closes #<issue>` line
 
-The marker is the only lifecycle opt-out. The Agent lifecycle workflow then exits successfully without reading or mutating Issue labels. It does not skip CI, Codex, branch protection, or other repository checks, and it does not infer opt-out from `docs:` titles, `spec/` branches, changed paths, or draft status. Implementation PRs still use exactly one standalone `Closes #<issue>` line and remain under the Agent Task lifecycle.
+The marker is the only lifecycle opt-out, and the value must be exactly `ignore`. Any other standalone `<!-- capt-lifecycle: ... -->` value, an empty value, or a malformed namespace comment fails closed. The Agent lifecycle workflow then exits successfully without reading or mutating Issue labels. It does not skip CI, Codex, branch protection, or other repository checks, and it does not infer opt-out from `docs:` titles, `spec/` branches, changed paths, or draft status. Implementation PRs still use exactly one standalone `Closes #<issue>` line and remain under the Agent Task lifecycle.
 
 ### `taskstoissues` evaluation
 
