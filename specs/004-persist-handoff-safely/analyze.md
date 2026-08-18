@@ -34,7 +34,7 @@ No CRITICAL or HIGH findings.
 | FR-006 refuse existing regular file | Yes | T006, T011 | |
 | FR-007 `--force` only with `--output`; regular file only | Yes | T011, T013 | Non-regular types refused |
 | FR-008 missing/non-directory parent; no mkdir | Yes | T004, T012 | |
-| FR-009 refuse every existing non-regular dest | Yes | T006, T012 | Symlink, directory, POSIX FIFO |
+| FR-009 refuse dest unless `lstat` mode is `S_ISREG` | Yes | T003, T006, T012 | POSIX FIFO covers special-file test; predicate is mode, not a type list |
 | FR-010 sibling temp, publish-as-commit, cleanup | Yes | T002, T005, T012 | POSIX `link` is commit; temp unlink is cleanup |
 | FR-011 POSIX `0600`; no parent chmod | Yes | T002, T004, T005 | |
 | FR-012 concise path-free payload-free errors | Yes | T006, T010, T012, T014 | Basename allowed |

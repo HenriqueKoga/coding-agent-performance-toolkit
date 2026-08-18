@@ -26,9 +26,9 @@ This Phase 0 note records choices the spec already pins. There are no remaining 
 
 ## Destination type and parent creation
 
-- **Decision**: Refuse any existing destination that is not a regular file, even with `--force`: symbolic link (including dangling), directory, FIFO, Unix socket, device, or other special file. Do not create missing parents. A parent that is a symlink to a directory is allowed.
-- **Rationale**: `--force` replacing through a symlink, FIFO, or device would clobber an unintended object. Checking only symlink and directory leaves those other types for `os.replace`. Creating parents is implicit persistence.
-- **Alternatives considered**: `Path.resolve()` then write, `mkdir(parents=True)`, `--force` replacing through a symlink, and treating FIFO/device as overwriteable files. Rejected as symlink follow, implicit directories, or redirectable overwrite.
+- **Decision**: After `os.lstat`, the destination is eligible only when missing or when `stat.S_ISREG(st.st_mode)` is true. Any other mode is refused even with `--force`. Symlink and directory get specific messages; FIFO, socket, device, and every other non-regular mode share `path is not a regular file.` Do not create missing parents. A parent that is a symlink to a directory is allowed.
+- **Rationale**: `--force` replacing a FIFO, socket, or device would clobber an unintended object. Enumerating special types is incomplete; the `lstat` mode is the closed predicate. `Path.is_file()` is unsafe here because it follows destination symlinks.
+- **Alternatives considered**: `Path.resolve()` then write, `mkdir(parents=True)`, `--force` replacing through a symlink, treating FIFO/device as overwriteable files, and an enumerated special-type list. Rejected as symlink follow, implicit directories, redirectable overwrite, or an incomplete type list.
 
 ## Atomic publish
 

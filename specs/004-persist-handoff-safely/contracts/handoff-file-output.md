@@ -71,7 +71,7 @@ Capture-input errors keep the existing handoff mapping and are not redefined her
 
 Implementation MUST:
 
-1. inspect the destination with a non-following `lstat` and refuse every existing non-regular type
+1. classify the destination with `os.lstat` and refuse unless the mode is a regular file (`stat.S_ISREG`) or the path is missing; do not follow the destination
 2. write the complete UTF-8 representation to an exclusive sibling temporary file in the same parent directory
 3. `fsync` that temporary file
 4. publish (the commit): exclusive `os.link` on POSIX or `os.rename` on Windows when `--force` is absent; on `--force`, POSIX `O_NOFOLLOW` open plus `fstat` of a regular file, then `os.replace`

@@ -44,10 +44,10 @@ description: "Task list for persist compact trace handoff safely"
 **Checkpoint**: `write_handoff_file()` can be unit-tested without CLI rendering
 
 - [ ] T002 Add failing unit tests in `tests/test_handoff_output.py` for creating a new file with complete synthetic content, POSIX `0600` where `os.name == "posix"`, and cleanup of a sibling temporary file after a failed publish
-- [ ] T003 Implement `HandoffOutputError` and `write_handoff_file(path, content, *, overwrite)` in `src/coding_agent_performance/trace/handoff_output.py` using `~` expansion and a non-following destination `lstat`; do not call `Path.resolve()` on the destination
+- [ ] T003 Implement `HandoffOutputError` and `write_handoff_file(path, content, *, overwrite)` in `src/coding_agent_performance/trace/handoff_output.py` using `~` expansion and `os.lstat` plus `stat.S_ISREG` as the only overwrite-eligible predicate; do not call `Path.resolve()`, `Path.is_file()`, or `Path.exists()` on the destination
 - [ ] T004 Implement parent-directory checks in `src/coding_agent_performance/trace/handoff_output.py`: parent must exist and be a directory; do not `mkdir`; do not chmod the parent; emit the contract messages from `specs/004-persist-handoff-safely/contracts/handoff-file-output.md`
 - [ ] T005 Implement exclusive sibling-temp create (`O_CREAT|O_EXCL`), UTF-8 write, flush, `fsync`, POSIX `chmod 0o600`, exclusive no-overwrite publish (`os.link` on POSIX, `os.rename` on Windows; never `os.replace` in that branch), `--force` POSIX `O_NOFOLLOW` open plus `fstat` then `os.replace`, publish-as-commit, and best-effort temp unlink after success in `src/coding_agent_performance/trace/handoff_output.py`; on failed publish, `unlink` the temp and leave dest unchanged
-- [ ] T006 Assert in `tests/test_handoff_output.py` that destination symlinks (including dangling), directories, and POSIX FIFOs (`os.mkfifo`) fail even when `overwrite=True` with the contract messages, that an existing regular file fails when `overwrite=False` with `Handoff file already exists: {basename}`, and that no absolute path appears in `HandoffOutputError` messages
+- [ ] T006 Assert in `tests/test_handoff_output.py` that a destination whose `lstat` mode is not `S_ISREG` fails even when `overwrite=True`, covering symlink (including dangling), directory, and a POSIX special file created with `os.mkfifo`; that an existing regular file fails when `overwrite=False` with `Handoff file already exists: {basename}`; and that no absolute path appears in `HandoffOutputError` messages
 
 ---
 

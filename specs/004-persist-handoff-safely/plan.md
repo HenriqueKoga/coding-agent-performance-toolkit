@@ -132,11 +132,11 @@ def write_handoff_file(path: Path, content: str, *, overwrite: bool) -> None: ..
 Behavior:
 
 1. Expand `~`. Do **not** `resolve()` the destination; that would follow a destination symlink.
-2. Inspect the destination with a non-following `lstat`:
-   - missing: allowed
-   - regular file and `overwrite` is false: fail
-   - regular file and `overwrite` is true: allowed
-   - any other existing type (symbolic link including dangling, directory, FIFO, Unix socket, device): fail, even if `overwrite` is true
+2. Classify the destination with `os.lstat` only. Do not follow the destination. Do not use `Path.is_file()`, `Path.is_dir()`, or `Path.exists()` for this check; those can follow a destination symlink.
+   - `ENOENT`: missing path, allowed.
+   - `stat.S_ISREG(st.st_mode)` is true and `overwrite` is false: fail with `Handoff file already exists: {basename}`.
+   - `stat.S_ISREG(st.st_mode)` is true and `overwrite` is true: allowed.
+   - `stat.S_ISREG(st.st_mode)` is false: refuse even if `overwrite` is true. Map `S_ISLNK` (including dangling) and `S_ISDIR` to their specific messages; every other non-regular mode, including FIFO, socket, and device, uses `Could not write handoff file: path is not a regular file.` The predicate is the `lstat` mode, not an enumerated allowlist of special types.
 3. Parent must already exist and be a directory (`Path.is_dir()` may follow a parent symlink). Do not `mkdir`. Do not chmod the parent.
 4. Create a sibling temporary file in that parent with `os.O_CREAT | os.O_EXCL | os.O_WRONLY` and mode `0o600` on POSIX (`0o666` masked by umask elsewhere).
 5. Write UTF-8 `content`, flush, `fsync`, then `chmod` `0o600` on POSIX.
