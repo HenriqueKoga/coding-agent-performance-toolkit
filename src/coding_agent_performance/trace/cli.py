@@ -18,6 +18,7 @@ from coding_agent_performance.trace.collector import (
 )
 from coding_agent_performance.trace.comparison import compare_summaries
 from coding_agent_performance.trace.handoff import handoff_from_summary
+from coding_agent_performance.trace.handoff_output import HandoffOutputError, write_handoff_file
 from coding_agent_performance.trace.rendering import (
     render_capture_list,
     render_comparison_json,
@@ -149,18 +150,39 @@ def handoff(
         OutputFormat,
         typer.Option("--format", help="Handoff output format."),
     ] = OutputFormat.TEXT,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", help="Write the selected handoff representation to this local file."),
+    ] = None,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Replace an existing regular file at --output."),
+    ] = False,
 ) -> None:
     """Export a compact evidence handoff from a local CAPT capture."""
     if ctx.args:
         typer.echo("Provide exactly one capture path.", err=True)
         raise typer.Exit(1) from None
+    if force and output is None:
+        typer.echo("Provide --output with --force.", err=True)
+        raise typer.Exit(1) from None
     summary = handoff_capture_or_fail(capture)
     artifact = handoff_from_summary(summary)
     if output_format is OutputFormat.JSON:
-        sys.stdout.write(render_handoff_json(artifact))
-        sys.stdout.write("\n")
+        content = f"{render_handoff_json(artifact)}\n"
+    else:
+        content = f"{render_handoff_text(artifact)}\n"
+    if output is None:
+        if output_format is OutputFormat.JSON:
+            sys.stdout.write(content)
+            return
+        typer.echo(render_handoff_text(artifact))
         return
-    typer.echo(render_handoff_text(artifact))
+    try:
+        write_handoff_file(output, content, overwrite=force)
+    except HandoffOutputError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from None
 
 
 def summarize_or_fail(path: Path) -> TraceSummary:
