@@ -356,6 +356,7 @@ def test_rerun_updates_the_same_comment_without_duplication(tmp_path: Path) -> N
     assert plan.outcome == "updated"
     assert plan.comment_action == "update"
     assert plan.existing_comment_id == 77
+    assert plan.comment_body is not None
     assert plan.comment_body != stale
     unchanged = plan_spec_handoff(
         event,
