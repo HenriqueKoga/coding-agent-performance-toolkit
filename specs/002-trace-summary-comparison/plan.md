@@ -75,6 +75,7 @@ class MetricDelta:
     candidate: int
     delta: int
 
+
 @dataclass(frozen=True, slots=True)
 class TraceComparison:
     tool_calls: MetricDelta
