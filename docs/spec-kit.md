@@ -2,7 +2,7 @@
 
 Spec Kit is the **specification layer** for CAPT. It does not replace the GitHub Issue lifecycle, Cursor Cloud Agent dispatch, CI, Codex review, bounded rework, or the human merge gate.
 
-This document is the operational guide for installing, updating, and using Spec Kit in this repository. Durable principles live in [`.specify/memory/constitution.md`](../.specify/memory/constitution.md). Agent operating rules live in [`AGENTS.md`](../AGENTS.md).
+This document is the operational guide for installing, updating, and using Spec Kit in this repository. It also defines the **Spec Agent** authoring contract. Durable principles live in [`.specify/memory/constitution.md`](../.specify/memory/constitution.md). Agent operating rules live in [`AGENTS.md`](../AGENTS.md).
 
 ## Responsibility split
 
@@ -15,6 +15,12 @@ Spec Kit
      ├─ implementation plan
      ├─ task decomposition
      └─ consistency analysis
+
+Spec Agent
+  └─ specification authoring
+     ├─ pinned Spec Kit commands and project-local templates
+     ├─ specs/<feature>/ artifacts
+     └─ specification-only review PR, then stop
 
 GitHub
   └─ operational source of truth
@@ -44,8 +50,102 @@ Human
 | [`.specify/memory/constitution.md`](../.specify/memory/constitution.md) | Durable product and engineering principles |
 | [`AGENTS.md`](../AGENTS.md) | How agents work in this repository: reading order, validation commands, Git/PR/lifecycle rules, human approval gates |
 | [Accepted ADRs](decisions/README.md) | Hard-to-reverse architectural decisions |
+| This document | Spec Kit pin, install, Spec Agent authoring contract, and the specification-to-Issue bridge |
 
 Do not maintain two full copies of the same rules. If a principle changes, update the constitution and keep `AGENTS.md` as a pointer plus operational detail.
+
+## Spec Agent contract
+
+The Spec Agent is the specification author. It takes a bounded feature brief, uses this repository's pinned Spec Kit workflow, and stops after a specification-only review PR.
+
+The contract is agent-independent. Cursor's `/speckit-*` skills are the installed integration here; another Spec Kit-supported agent may invoke the same commands through its own integration. Do not invent a parallel specification format, skip the project-local template overrides, or treat Cursor-specific reasoning as specification semantics.
+
+### Input
+
+A bounded feature brief plus this repository's context: constitution, `AGENTS.md`, product, architecture, related ADRs, and the files the brief names.
+
+The brief should state goal, acceptance criteria, out of scope, and constraints. It is not a GitHub Issue. It must not include secrets, credentials, real captures, prompts, tool payloads, or private telemetry.
+
+### Pinned Spec Kit only
+
+Use the repository-pinned Spec Kit integration, scripts, and project-local templates. Do not hand-write an alternative spec, plan, or task format.
+
+Invoke the same commands Spec Kit documents (`/speckit.specify`, `/speckit.plan`, and so on). In Cursor they appear as `/speckit-*`. Other integrations may use a different invocation form. The command sequence and the resulting Markdown artifacts are the contract, not the slash-command spelling.
+
+### Authoring sequence
+
+Use this path for new roadmap work. The registered `speckit` workflow is truncated so it stops after `/speckit.tasks` and never calls `/speckit.implement`.
+
+```text
+bounded feature brief + repository context
+        ↓
+/speckit.constitution   # only when a durable principle must change
+/speckit.specify
+/speckit.clarify        # when the spec still has NEEDS CLARIFICATION items
+/speckit.plan
+/speckit.tasks
+/speckit.analyze        # read-only; does not write files
+        ↓
+persist approved report as specs/<feature>/analyze.md
+        ↓
+specification-only review PR
+  standalone <!-- capt-lifecycle: ignore -->
+  Related to #N only if an operational Issue already exists
+  no standalone Closes #N
+        ↓
+STOP  (Spec Agent handoff)
+        ↓
+human review / merge of the specification
+        ↓
+manual GitHub Agent Task Issue
+        ↓
+human agent:ready
+        ↓
+existing Cursor Cloud Agent / CI / Codex lifecycle
+```
+
+`/speckit.checklist` is optional. Use it when a requirements-quality review would reduce ambiguity. It does not mark an Issue ready and does not replace `analyze.md`.
+
+### Output
+
+Write specification artifacts under `specs/<nnn-short-name>/` using the existing project-local Spec Kit templates:
+
+- `spec.md`
+- `plan.md`
+- `tasks.md`
+- `analyze.md` after reviewing the read-only `/speckit.analyze` report
+
+Keep examples synthetic. Do not commit `.specify/feature.json`.
+
+### Specification review PR
+
+Open one specification-only pull request. Copy [`.github/spec-review-pull-request.md`](../.github/spec-review-pull-request.md) as the pull-request body. Do not use the default Agent Task pull-request template.
+
+That body must:
+
+- include a standalone `<!-- capt-lifecycle: ignore -->` line
+- not include a standalone `Closes #<issue>` line
+- include `Related to #<issue>` only when an operational Agent Task Issue already exists
+
+Do not combine the opt-out marker with any `Closes #<issue>` line. The marker is the only lifecycle opt-out, and the value must be exactly `ignore`. Any other standalone `<!-- capt-lifecycle: ... -->` value, an empty value, or a malformed namespace comment fails closed. Opt-out does not skip CI, Codex, branch protection, or other repository checks, and it is not inferred from `docs:` titles, `spec/` branches, changed paths, or draft status.
+
+Keep the PR specification-only: Spec Kit artifacts under `specs/` plus the minimum documentation needed to land them. Do not change CAPT runtime code, public CLI behavior, capture or summary schemas, provider adapters, persistence, network behavior, runtime dependencies, or GitHub Actions lifecycle, dispatch, or rework workflows.
+
+Implementation PRs still use the default pull-request template and exactly one standalone `Closes #<issue>` line.
+
+### Stop conditions
+
+After the specification review PR is opened, the Spec Agent stops. It must not:
+
+- run `/speckit.implement` or `/speckit.converge` as a production path
+- run `/speckit.taskstoissues`
+- create, edit, or close a GitHub Agent Task Issue
+- apply or mutate lifecycle or risk labels
+- dispatch another agent
+- merge the pull request
+- change CAPT runtime code or GitHub Actions operational workflows
+
+Human review of the specification, the later Agent Task Issue, `agent:ready`, Cursor dispatch, CI, Codex review, and merge remain unchanged.
 
 ## Version pin
 
@@ -91,34 +191,13 @@ This repository is already initialized. Re-running `specify init --here --force`
 
 ## Cursor integration
 
-The project uses Spec Kit's `cursor-agent` integration in skills mode.
+The project uses Spec Kit's `cursor-agent` integration in skills mode. That is the installed adapter, not a second specification language.
 
 Skills live in [`.cursor/skills/`](../.cursor/skills/) and are committed so every clone has the same commands. Other `.cursor/` content is ignored so credentials and local agent state stay off the repository.
 
-In Cursor Agent, the skills appear as `/speckit-*` (hyphen form). Spec Kit documentation often writes `/speckit.*`. Both refer to the same commands.
+In Cursor Agent, the skills appear as `/speckit-*` (hyphen form). Spec Kit documentation often writes `/speckit.*`. Both refer to the same commands. A Spec Agent on another supported integration should run the equivalent pinned commands and still emit the same `specs/<feature>/` artifacts.
 
-## Recommended specification workflow
-
-Use this path for new roadmap work. The registered `speckit` workflow is truncated so it stops after `/speckit.tasks` and never calls `/speckit.implement`.
-
-```text
-/speckit.constitution   # once, or when principles change
-/speckit.specify
-/speckit.clarify        # when the spec still has NEEDS CLARIFICATION items
-/speckit.plan
-/speckit.tasks
-/speckit.analyze        # read-only; does not write files
-        ↓
-persist approved report as specs/<feature>/analyze.md
-        ↓
-manual GitHub Agent Task Issue
-        ↓
-needs:human-review → human agent:ready
-        ↓
-existing Cursor Cloud Agent / CI / Codex lifecycle
-```
-
-`/speckit.checklist` is optional. Use it when a requirements-quality review would reduce ambiguity. It does not mark an Issue ready.
+## Command details
 
 ### constitution
 
@@ -152,21 +231,9 @@ Do not modify `spec.md`, `plan.md`, or `tasks.md` from the analyze command itsel
 
 ## Bridge to GitHub Issues
 
-After `analyze` is clean, create **one** GitHub Issue with the [Agent Task template](../.github/ISSUE_TEMPLATE/agent-task.yml). Copy the goal, acceptance criteria, out of scope, constraints, validation, privacy, compatibility, and human decisions from the Spec Kit artifacts. Keep examples synthetic.
+The Spec Agent does not create the operational Issue. After the specification review PR is reviewed and merged, a human creates **one** GitHub Issue with the [Agent Task template](../.github/ISSUE_TEMPLATE/agent-task.yml). Copy the goal, acceptance criteria, out of scope, constraints, validation, privacy, compatibility, and human decisions from the Spec Kit artifacts. Keep examples synthetic.
 
 A human later applies exactly one `risk:*` label and, when ready, `agent:ready`. That remains the only dispatch trigger for Cursor Cloud Agent.
-
-### Specification review pull requests
-
-Specification-only review PRs are part of the development flow. They must not close or mutate the operational Agent Task Issue.
-
-Those PRs should:
-
-- include a standalone `<!-- capt-lifecycle: ignore -->` line in the pull-request body
-- link the operational Issue with `Related to #<issue>` rather than `Closes #<issue>`
-- not combine the opt-out marker with any `Closes #<issue>` line
-
-The marker is the only lifecycle opt-out, and the value must be exactly `ignore`. Any other standalone `<!-- capt-lifecycle: ... -->` value, an empty value, or a malformed namespace comment fails closed. The Agent lifecycle workflow then exits successfully without reading or mutating Issue labels. It does not skip CI, Codex, branch protection, or other repository checks, and it does not infer opt-out from `docs:` titles, `spec/` branches, changed paths, or draft status. Implementation PRs still use exactly one standalone `Closes #<issue>` line and remain under the Agent Task lifecycle.
 
 ### `taskstoissues` evaluation
 
@@ -181,7 +248,7 @@ It does **not** preserve the CAPT issue contract:
 - It can create many issues from one feature, instead of one reviewable Agent Task.
 - It has no human `agent:ready` gate and must not be treated as implementation dispatch.
 
-Because those gaps cannot be closed without changing the lifecycle, **do not run `/speckit.taskstoissues` in this repository**. Keep Issue creation as an explicit manual bridge.
+Because those gaps cannot be closed without changing the lifecycle, **do not run `/speckit.taskstoissues` in this repository**. Keep Issue creation as an explicit manual bridge after specification review.
 
 ## What this pilot does not change
 
@@ -194,14 +261,15 @@ Because those gaps cannot be closed without changing the lifecycle, **do not run
 
 ## Project-local customizations
 
-CAPT uses only project-local template overrides and one bundled-workflow truncation:
+CAPT uses only project-local template overrides, one bundled-workflow truncation, and one specification-review pull-request template:
 
 - `.specify/templates/overrides/spec-template.md`
 - `.specify/templates/overrides/plan-template.md`
 - `.specify/templates/overrides/tasks-template.md`
-- `.specify/workflows/speckit/workflow.yml` stops after `/speckit.tasks` and a manual Agent Task handoff gate; it does not call `/speckit.implement`
+- `.specify/workflows/speckit/workflow.yml` stops after `/speckit.tasks` and a specification-review PR handoff gate; it does not call `/speckit.implement`
+- `.github/spec-review-pull-request.md` is the Spec Agent pull-request body
 
-These exist to surface CAPT constraints in generated artifacts. This pilot does not add a custom extension, bundle, catalog, or organization-wide preset. On Spec Kit upgrade, keep the workflow truncated; do not restore the bundled implement step.
+These exist to surface CAPT constraints in generated artifacts and to make the Spec Agent PR contract executable. This pilot does not add a custom extension, bundle, catalog, or organization-wide preset. On Spec Kit upgrade, keep the workflow truncated; do not restore the bundled implement step.
 
 ## What to commit
 
@@ -214,6 +282,7 @@ Commit:
 - `.specify/workflows/` (bundled workflow truncated to stop before `/speckit.implement`)
 - `.cursor/skills/speckit-*/`
 - `specs/` feature artifacts that are synthetic and reviewable
+- `.github/spec-review-pull-request.md`
 - This document and the related `AGENTS.md` / `docs/development.md` pointers
 
 Do not commit:

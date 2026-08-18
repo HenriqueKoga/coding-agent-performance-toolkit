@@ -4,7 +4,7 @@ workflow:
   name: "Specify through tasks"
   version: "1.0.0"
   author: "GitHub"
-  description: "Runs specify → plan → tasks with review gates; stops before implementation"
+  description: "Runs specify → plan → tasks with review gates; stops at a specification-only review PR"
 
 requires:
   # 0.8.5 is the first release with engine-side resolution of the
@@ -74,6 +74,6 @@ steps:
 
   - id: handoff
     type: gate
-    message: "Specification artifacts are ready. Create one GitHub Agent Task Issue by hand. Do not run /speckit.implement. Wait for a human to apply agent:ready."
+    message: "Specification artifacts are ready. Open a specification-only review PR using .github/spec-review-pull-request.md. Do not run /speckit.implement or /speckit.taskstoissues. Do not create an Agent Task Issue, mutate labels, or change runtime code."
     options: [approve, reject]
     on_reject: abort

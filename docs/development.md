@@ -65,7 +65,7 @@ Related documents:
 ## Development workflow
 
 1. Start from an up-to-date `main`.
-2. For new roadmap work, specify the change with Spec Kit before opening an Agent Task Issue. See [spec-kit.md](spec-kit.md).
+2. For new roadmap work, a Spec Agent authors Spec Kit artifacts and opens a specification-only review PR. After that PR is reviewed, a human opens one Agent Task Issue. See [spec-kit.md](spec-kit.md).
 3. Create a focused branch with a `feat/`, `fix/`, `refactor/`, `docs/`, `test/`, or `chore/` prefix.
 4. Read the documents relevant to the change.
 5. Write or update tests first when behavior changes.
@@ -76,15 +76,15 @@ Related documents:
 10. Update documentation when contracts, architecture, or workflow change.
 11. Open a pull request. Do not merge it automatically.
 
-Spec Kit is development tooling invoked with pinned `uvx` or `uv tool`. It is not a CAPT runtime dependency. `/speckit.implement` is not the production implementation path. `/speckit.taskstoissues` is not used. GitHub Issue creation stays a manual Agent Task template step. Only a human applies `agent:ready`.
+Spec Kit is development tooling invoked with pinned `uvx` or `uv tool`. It is not a CAPT runtime dependency. `/speckit.implement` is not the production implementation path. `/speckit.taskstoissues` is not used. The Spec Agent stops after the specification review PR. GitHub Issue creation stays a later manual Agent Task template step. Only a human applies `agent:ready`.
 
 ## Agent-assisted workflow
 
 The same tool may play more than one role. Keep the handoffs explicit.
 
-### Planning agent
+### Spec Agent
 
-Turns a goal into Spec Kit constitution-aligned specification artifacts, then into a GitHub Agent Task Issue. Names risks and out-of-scope items. Does not silently implement unapproved requirements. Does not apply `agent:ready` or risk labels.
+Takes a bounded feature brief plus repository context and uses CAPT's pinned Spec Kit workflow to produce reviewable artifacts under `specs/<feature>/` and a specification-only review PR. Stops after that PR handoff. Does not run `/speckit.implement` or `/speckit.taskstoissues`, create an Agent Task Issue, mutate lifecycle or risk labels, dispatch another agent, merge, or change runtime code. See [spec-kit.md](spec-kit.md).
 
 ### Implementation agent
 
@@ -104,7 +104,7 @@ GitHub Actions maintains Agent Task labels after a human has applied `agent:read
 
 Applying `agent:ready` to an open Issue starts a dedicated dispatch workflow. That workflow validates the Issue, then creates exactly one Cursor Cloud Agent through `POST https://api.cursor.com/v1/agents`. It does not change lifecycle or risk labels. `agent:working` still happens only when the implementation Draft PR opens.
 
-A pull request whose body contains a standalone `<!-- capt-lifecycle: ignore -->` line, and no standalone `Closes #<issue>` line, is intentionally outside the Agent Task lifecycle. The lifecycle workflow exits successfully without reading or mutating Issue lifecycle or risk labels. This opt-out does not skip CI, Codex, branch protection, or other repository checks. Do not infer opt-out from `docs:` titles, `spec/` branches, changed paths, draft status, or the absence of `Closes #<issue>`. Specification and documentation review PRs should use this marker plus `Related to #<issue>` instead of `Closes #<issue>`. Combining the opt-out marker with any standalone `Closes #<issue>` line fails closed.
+A pull request whose body contains a standalone `<!-- capt-lifecycle: ignore -->` line, and no standalone `Closes #<issue>` line, is intentionally outside the Agent Task lifecycle. The lifecycle workflow exits successfully without reading or mutating Issue lifecycle or risk labels. This opt-out does not skip CI, Codex, branch protection, or other repository checks. Do not infer opt-out from `docs:` titles, `spec/` branches, changed paths, draft status, or the absence of `Closes #<issue>`. Specification review PRs should copy [`.github/spec-review-pull-request.md`](../.github/spec-review-pull-request.md). Other documentation review PRs should use the same marker plus `Related to #<issue>` instead of `Closes #<issue>`. Combining the opt-out marker with any standalone `Closes #<issue>` line fails closed.
 
 A standalone `<!-- capt-lifecycle: ... -->` comment is recognized as the lifecycle namespace. The value must be exactly `ignore`. Any other value, an empty value, or a malformed namespace comment fails closed.
 

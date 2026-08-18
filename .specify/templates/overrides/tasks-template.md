@@ -10,7 +10,7 @@ description: "Task list template for feature implementation"
 
 **Tests**: CAPT features that change behavior include tests. Use synthetic fixtures only.
 
-**Organization**: Tasks are grouped by user story. After `/speckit.analyze`, translate the approved work into one GitHub Agent Task Issue by hand. Do not run `/speckit.implement` as the production path. Do not run `/speckit.taskstoissues` to create lifecycle issues.
+**Organization**: Tasks are grouped by user story. After `/speckit.analyze`, persist `analyze.md` and open a specification-only review PR. After that PR is reviewed, a human creates one GitHub Agent Task Issue by hand. Do not run `/speckit.implement` as the production path. Do not run `/speckit.taskstoissues` to create lifecycle issues.
 
 ## Format: `[ID] [P?] [Story] Description`
 
@@ -85,6 +85,6 @@ description: "Task list template for feature implementation"
 
 ## Notes
 
-- Prefer one Agent Task Issue for the feature, not one GitHub Issue per Spec Kit task
+- Prefer one Agent Task Issue for the feature after specification review, not one GitHub Issue per Spec Kit task
 - `/speckit.taskstoissues` cannot populate the Agent Task template, required risk classification, or human `agent:ready` gate
 - Do not implement from this file through `/speckit.implement` in the CAPT pilot
