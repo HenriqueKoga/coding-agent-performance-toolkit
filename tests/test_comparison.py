@@ -238,7 +238,9 @@ def test_observed_zero_is_available_except_for_model_requests(tmp_path: Path) ->
 def test_metric_comparison_contract() -> None:
     available = MetricComparison(available=True, baseline=10, candidate=8, delta=-2)
     unavailable = MetricComparison(available=False, baseline=None, candidate=None, delta=None)
-    assert available.delta == available.candidate - available.baseline
+    assert available.delta == -2
+    assert available.candidate == 8
+    assert available.baseline == 10
     assert unavailable.available is False
     with pytest.raises(ValueError):
         MetricComparison(available=True, baseline=1, candidate=2, delta=0)
@@ -484,12 +486,18 @@ def test_text_and_json_agree_and_omit_sensitive_data(tmp_path: Path) -> None:
 def test_fixture_summary_contract_is_unchanged() -> None:
     payload = summary_to_dict(summarize_capture(FIXTURE_PATH))
     availability = summarize_capture(FIXTURE_PATH).comparison_availability
+    tools = payload["tools"]
+    model_usage = payload["model_usage"]
+    sessions = payload["sessions"]
     assert isinstance(availability, ComparisonAvailability)
     assert "comparison_availability" not in payload
     assert payload["schema_version"] == 1
-    assert payload["tools"]["calls"] == 3
-    assert payload["model_usage"]["requests"] == 4
-    assert payload["sessions"]["compactions"] == 0
+    assert isinstance(tools, dict)
+    assert isinstance(model_usage, dict)
+    assert isinstance(sessions, dict)
+    assert tools["calls"] == 3
+    assert model_usage["requests"] == 4
+    assert sessions["compactions"] == 0
     comparison = compare_summaries(summarize_capture(FIXTURE_PATH), summarize_capture(FIXTURE_PATH))
     assert "synthetic-capture.jsonl" not in render_comparison_json(comparison)
     assert render_comparison_text(comparison).startswith("Comparison")
