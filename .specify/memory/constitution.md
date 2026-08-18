@@ -109,14 +109,14 @@ Spec Kit improves specification quality. It does not replace the GitHub/Cursor/C
 ```text
 Roadmap / product idea
         ↓
-Spec Agent (pinned Spec Kit)
+manual GitHub Agent Task Issue (`needs:design`)
+        ↓
+Spec Agent (pinned Spec Kit) via manual workflow_dispatch from main
   constitution? → specify → clarify? → plan → tasks → analyze.md
         ↓
 specification-only review PR
         ↓
 human review / merge
-        ↓
-manual GitHub Agent Task Issue
         ↓
 human: agent:ready
         ↓
@@ -133,4 +133,4 @@ existing Cursor / CI / Codex lifecycle
 - Amendments require a pull request and human approval.
 - Do not weaken privacy, local-first, deterministic-first, provider-boundary, compatibility, or human-approval rules to make a specification or tool fit.
 
-**Version**: 1.0.1 | **Ratified**: 2026-08-17 | **Last Amended**: 2026-08-18
+**Version**: 1.0.2 | **Ratified**: 2026-08-17 | **Last Amended**: 2026-08-18
