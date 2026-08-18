@@ -87,8 +87,7 @@ class TraceComparison:
     session_compactions: MetricDelta
 
 
-def compare_summaries(baseline: TraceSummary, candidate: TraceSummary) -> TraceComparison:
-    ...
+def compare_summaries(baseline: TraceSummary, candidate: TraceSummary) -> TraceComparison: ...
 ```
 
 A single small `MetricDelta` abstraction is justified because the exact same invariant (`baseline`, `candidate`, `candidate - baseline`) applies to all eight current metrics. Do not introduce metric registries, generic schemas, protocols, plugin systems, or dynamic field discovery.
