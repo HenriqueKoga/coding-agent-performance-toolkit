@@ -74,10 +74,12 @@ Invoke the same commands Spec Kit documents (`/speckit.specify`, `/speckit.plan`
 
 ### Authoring sequence
 
-Use this path for new roadmap work. The registered `speckit` workflow is truncated so it stops after `/speckit.tasks` and never calls `/speckit.implement`.
+Use this path for new roadmap work. The registered `speckit` workflow is truncated so it runs through `/speckit.analyze` and never calls `/speckit.implement`.
 
 ```text
 bounded feature brief + repository context
+        ↓
+focused spec/ or docs/ branch (not main)
         ↓
 /speckit.constitution   # only when a durable principle must change
 /speckit.specify
@@ -119,7 +121,7 @@ Keep examples synthetic. Do not commit `.specify/feature.json`.
 
 ### Specification review PR
 
-Open one specification-only pull request. Copy [`.github/spec-review-pull-request.md`](../.github/spec-review-pull-request.md) as the pull-request body. Do not use the default Agent Task pull-request template.
+Open one specification-only pull request from the specification branch, not from `main`. Prefer a `spec/<nnn-short-name>` branch, distinct from a later `feat/` implementation branch. Copy [`.github/spec-review-pull-request.md`](../.github/spec-review-pull-request.md) as the pull-request body. Do not use the default Agent Task pull-request template.
 
 That body must:
 
@@ -266,7 +268,7 @@ CAPT uses only project-local template overrides, one bundled-workflow truncation
 - `.specify/templates/overrides/spec-template.md`
 - `.specify/templates/overrides/plan-template.md`
 - `.specify/templates/overrides/tasks-template.md`
-- `.specify/workflows/speckit/workflow.yml` stops after `/speckit.tasks` and a specification-review PR handoff gate; it does not call `/speckit.implement`
+- `.specify/workflows/speckit/workflow.yml` runs through `/speckit.analyze`, persistence of `analyze.md`, and a specification-review PR handoff gate; it does not call `/speckit.implement`
 - `.github/spec-review-pull-request.md` is the Spec Agent pull-request body
 
 These exist to surface CAPT constraints in generated artifacts and to make the Spec Agent PR contract executable. This pilot does not add a custom extension, bundle, catalog, or organization-wide preset. On Spec Kit upgrade, keep the workflow truncated; do not restore the bundled implement step.

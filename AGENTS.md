@@ -156,7 +156,7 @@ Small internal changes do not need an ADR.
 ## Git and PR rules
 
 - Use small, focused branches.
-- Prefix branches with `feat/`, `fix/`, `refactor/`, `docs/`, `test/`, or `chore/`.
+- Prefix branches with `feat/`, `fix/`, `refactor/`, `docs/`, `test/`, `chore/`, or `spec/`.
 - Write conventional, intentional commits.
 - Do not mix unrelated refactors.
 - Do not revert existing work without authorization.

@@ -65,16 +65,17 @@ Related documents:
 ## Development workflow
 
 1. Start from an up-to-date `main`.
-2. For new roadmap work, a Spec Agent authors Spec Kit artifacts and opens a specification-only review PR. After that PR is reviewed, a human opens one Agent Task Issue. See [spec-kit.md](spec-kit.md).
-3. Create a focused branch with a `feat/`, `fix/`, `refactor/`, `docs/`, `test/`, or `chore/` prefix.
-4. Read the documents relevant to the change.
-5. Write or update tests first when behavior changes.
-6. Implement incrementally.
-7. Run targeted tests while developing.
-8. Run the full validation set before delivery.
-9. Review `git diff`.
-10. Update documentation when contracts, architecture, or workflow change.
-11. Open a pull request. Do not merge it automatically.
+2. Create a focused branch before authoring, committing, or opening a PR.
+   - Specification authoring uses a `spec/` or `docs/` prefix. On that branch, the Spec Agent authors Spec Kit artifacts, including `analyze.md`, and opens a specification-only review PR. After that PR is reviewed, a human opens one Agent Task Issue. See [spec-kit.md](spec-kit.md).
+   - Implementation uses a `feat/`, `fix/`, `refactor/`, `docs/`, `test/`, or `chore/` prefix.
+3. Read the documents relevant to the change.
+4. Write or update tests first when behavior changes.
+5. Implement incrementally.
+6. Run targeted tests while developing.
+7. Run the full validation set before delivery.
+8. Review `git diff`.
+9. Update documentation when contracts, architecture, or workflow change.
+10. Open a pull request. Do not merge it automatically.
 
 Spec Kit is development tooling invoked with pinned `uvx` or `uv tool`. It is not a CAPT runtime dependency. `/speckit.implement` is not the production implementation path. `/speckit.taskstoissues` is not used. The Spec Agent stops after the specification review PR. GitHub Issue creation stays a later manual Agent Task template step. Only a human applies `agent:ready`.
 
@@ -84,7 +85,7 @@ The same tool may play more than one role. Keep the handoffs explicit.
 
 ### Spec Agent
 
-Takes a bounded feature brief plus repository context and uses CAPT's pinned Spec Kit workflow to produce reviewable artifacts under `specs/<feature>/` and a specification-only review PR. Stops after that PR handoff. Does not run `/speckit.implement` or `/speckit.taskstoissues`, create an Agent Task Issue, mutate lifecycle or risk labels, dispatch another agent, merge, or change runtime code. See [spec-kit.md](spec-kit.md).
+Takes a bounded feature brief plus repository context and, on a `spec/` or `docs/` branch, uses CAPT's pinned Spec Kit workflow to produce reviewable artifacts under `specs/<feature>/`, including `analyze.md`, and a specification-only review PR. Stops after that PR handoff. Does not run `/speckit.implement` or `/speckit.taskstoissues`, create an Agent Task Issue, mutate lifecycle or risk labels, dispatch another agent, merge, or change runtime code. See [spec-kit.md](spec-kit.md).
 
 ### Implementation agent
 
