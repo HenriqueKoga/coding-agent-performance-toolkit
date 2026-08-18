@@ -36,7 +36,7 @@ A developer or local script wants the comparison as structured JSON with the sam
 
 **Acceptance Scenarios**:
 
-1. **Given** a valid comparison, **When** `--format json` is used, **Then** JSON contains only the fixed allowlisted comparison contract.
+1. **Given** a valid comparison, **When** `--format json` is used, **Then** JSON contains exactly the versioned allowlisted comparison contract defined in this specification and `plan.md`.
 2. **Given** identical inputs, **When** comparison is repeated, **Then** serialized field order, availability state, and numeric values are stable.
 
 ### Edge Cases
@@ -67,10 +67,11 @@ A developer or local script wants the comparison as structured JSON with the sam
   8. session compactions (`sessions.compactions`)
 - **FR-004**: For each metric, CAPT MUST preserve whether the value is actually observed/available; absence of telemetry MUST NOT be represented as an observed zero for comparison purposes.
 - **FR-005**: When a metric is available on both baseline and candidate, it MUST report integer `baseline`, integer `candidate`, and signed integer `delta`, where `delta = candidate - baseline`.
-- **FR-006**: When a metric is unavailable on either side, the comparison slot MUST remain present but MUST be explicitly unavailable; its `delta` MUST be absent/null and MUST NOT be computed from fallback zeros.
+- **FR-006**: When a metric is unavailable on either side, the comparison slot MUST remain present but MUST be explicitly unavailable; its `baseline`, `candidate`, and `delta` MUST be `null` in JSON and MUST NOT be computed from fallback zeros.
 - **FR-007**: Availability MUST be tracked per metric, not inferred from the final numeric value. In particular:
   - model request availability MUST distinguish API-request-event evidence from metric-only/no-usage captures;
   - estimated cost, input tokens, and output tokens MUST be independently available only when their own source data is observed;
+  - the normalization boundary MUST preserve per-field presence for API request cost/input/output attributes instead of coercing missing/invalid values into indistinguishable observed zeros;
   - tool calls/failures MUST distinguish observed tool-event coverage from captures without tool telemetry;
   - tool result bytes MUST be unavailable if the required result-size evidence is incomplete for counted tool calls;
   - session compactions MUST distinguish observed lifecycle/log coverage from captures where compaction telemetry was not captured.
@@ -81,7 +82,8 @@ A developer or local script wants the comparison as structured JSON with the sam
 - **FR-012**: Comparison MUST remain local-only and read-only; it MUST NOT persist comparison state or send data externally.
 - **FR-013**: Invalid input MUST exit non-zero with concise error text, no traceback, no payload contents, and no absolute path disclosure.
 - **FR-014**: Existing `trace summarize`, `trace list`, collection, summary JSON schema/version, and insight behavior MUST remain unchanged.
-- **FR-015**: The implementation MAY add provider-neutral internal availability metadata to the immutable summary domain model, but existing `trace summarize` text/JSON rendering MUST NOT expose that metadata or change its public schema in this feature.
+- **FR-015**: The implementation MAY add provider-neutral internal availability metadata to normalized event/domain records and the immutable summary domain model, but existing `trace summarize` text/JSON rendering MUST NOT expose that metadata or change its public schema in this feature.
+- **FR-016**: The comparison JSON contract MUST use `schema_version: 1`, a top-level `metrics` object, and exactly the eight snake_case metric keys from FR-003 as defined in `plan.md`; no additional top-level or per-metric fields are permitted in v1.
 
 ### Key Entities
 
@@ -114,7 +116,8 @@ A developer or local script wants the comparison as structured JSON with the sam
 
 ### Provider neutrality
 
-- Availability semantics belong to normalized aggregation, not provider-specific comparison code.
+- Availability semantics belong to normalized evidence and aggregation, not provider-specific comparison code.
+- A provider adapter MAY preserve presence/absence of fields already present in its telemetry when that information is otherwise lost during normalization; the normalized representation MUST remain provider-neutral.
 - The comparison layer consumes only normalized immutable summary values and provider-neutral availability metadata.
 - No new Claude Code-specific branch is permitted in comparison logic.
 
@@ -122,8 +125,8 @@ A developer or local script wants the comparison as structured JSON with the sam
 
 - Adds one public CLI command and a new comparison output contract.
 - Existing trace summary JSON schema/version and capture schema remain unchanged.
-- An additive internal summary-domain field for availability is permitted only if existing summary rendering remains byte-for-byte contract compatible apart from unrelated pre-existing nondeterminism, if any.
-- JSON comparison fields must be explicitly allowlisted and stable.
+- Additive internal normalized/domain fields for availability are permitted only if existing summary rendering remains compatible.
+- JSON comparison fields are explicitly allowlisted and stable.
 
 ### Out of scope
 
@@ -153,13 +156,14 @@ uv build --clear
 git diff --check
 ```
 
-Plus focused tests covering observed zero versus unavailable telemetry for all eight comparison slots, mixed availability between baseline/candidate, and deterministic text/JSON rendering.
+Plus focused tests covering observed zero versus unavailable telemetry for all eight comparison slots, mixed availability between baseline/candidate, normalization-field presence, same-file snapshot reuse, and deterministic text/JSON rendering.
 
 ### Human decisions
 
 - Human approval is required before the operational Issue receives `agent:ready`.
-- This specification explicitly approves additive provider-neutral internal availability metadata required to distinguish observed zero from missing telemetry, provided the existing trace-summary public rendering/schema remains unchanged.
-- Stop for human review if implementation requires changing the capture schema, provider adapters, existing trace-summary public output/schema version, persistence, a new runtime dependency, or a generic experiment framework.
+- This specification explicitly approves the **narrow additive normalization change** required to preserve presence/absence of existing API-request cost/input/output fields, plus provider-neutral internal availability metadata required to distinguish observed zero from missing telemetry. It does not approve provider-specific comparison logic, new telemetry mappings, or broader adapter redesign.
+- Existing trace-summary public rendering/schema must remain unchanged.
+- Stop for human review if implementation requires changing the capture schema, adding new provider telemetry mappings beyond preserving existing field presence, changing existing trace-summary public output/schema version, persistence, a new runtime dependency, or a generic experiment framework.
 - Spec Kit must not apply lifecycle or risk labels.
 
 ## Success Criteria *(mandatory)*
@@ -172,10 +176,12 @@ Plus focused tests covering observed zero versus unavailable telemetry for all e
 - **SC-004**: Comparison memory usage does not scale with raw capture size beyond the existing bounded summarization behavior.
 - **SC-005**: Successful comparison output contains no input paths, identifiers, raw payload content, or provider-specific provenance.
 - **SC-006**: Existing `capt trace summarize` public text/JSON contract and schema version remain unchanged.
+- **SC-007**: The comparison JSON output is reproducibly described by one mandatory v1 schema with no implementation-defined field layout.
 
 ## Assumptions
 
 - `TraceSummary` remains the canonical immutable result of capture summarization and may gain internal provider-neutral availability metadata without changing its existing rendered schema.
+- Existing normalized request records may gain additive presence metadata for fields already parsed from telemetry.
 - Existing `summarize_capture(Path)` can independently summarize both explicit inputs.
 - Availability can be accumulated incrementally using fixed-size state alongside existing counters.
 - Estimated cost remains represented deterministically as integer USD micros when observed.
