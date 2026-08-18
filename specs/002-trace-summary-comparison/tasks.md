@@ -6,93 +6,105 @@
 
 **Tests**: Required. Synthetic fixtures only.
 
-**Organization**: One primary comparison story plus structured-output coverage. After analyze, implementation stays on existing GitHub Agent Task Issue #36. Do not run `/speckit.implement` or `/speckit.taskstoissues`.
+**Organization**: Preserve observed-vs-unavailable semantics first, then add comparison and rendering. Implementation stays on existing GitHub Agent Task Issue #36. Do not run `/speckit.implement` or `/speckit.taskstoissues`.
 
 ## CAPT delivery constraints
 
-- [x] Tasks stay inside the spec's out-of-scope boundary
 - [x] Tests use synthetic fixtures only
 - [x] No runtime dependency, LLM, network, or persistence task
-- [x] New public command/output contract is explicit
-- [x] Privacy allowlist and payload-free errors are preserved
+- [x] Existing trace-summary public text/JSON schema stays unchanged
+- [x] New comparison contract is explicit and allowlisted
+- [x] Missing telemetry is never converted into observed zero
+- [x] Availability state remains provider-neutral and fixed-size
 - [x] Streaming / bounded memory is preserved
 - [x] Final delivery uses Issue #36 with human-applied risk and `agent:ready`
-- [x] Spec Kit does not apply lifecycle or risk labels
 
-## Phase 1: Setup
+## Phase 1: Inspect current evidence boundaries
 
-**Purpose**: Confirm current summary, CLI, rendering, and error boundaries before adding comparison.
+- [ ] T001 Inspect `report.py`, `summary.py`, all current accumulators, normalized event/metric models, `cli.py`, `rendering.py`, and tests that establish fallback/zero behavior
+- [ ] T002 Identify the exact normalized evidence required to mark each of the eight metric slots available without using numeric-value heuristics
 
-- [ ] T001 Inspect `src/coding_agent_performance/trace/report.py`, `summary.py`, `cli.py`, `rendering.py`, relevant summary-format docs, and existing CLI/rendering tests
-
----
-
-## Phase 2: Foundational comparison model
-
-**Purpose**: Define the fixed immutable comparison contract and pure transformation.
-
-- [ ] T002 Add focused failing unit tests for `MetricDelta`/`TraceComparison` and the eight-metric allowlist in `tests/test_comparison.py` or the repository's closest existing test module
-- [ ] T003 Implement immutable comparison DTOs and `compare_summaries()` in `src/coding_agent_performance/trace/comparison.py`
-- [ ] T004 Verify metric order is fixed and `delta == candidate - baseline` for identical/increase/decrease/zero scenarios
-
-**Checkpoint**: Two immutable `TraceSummary` values can be compared without CLI, provider, or rendering dependencies
+**Checkpoint**: Availability rules are mapped to existing normalized evidence before code changes.
 
 ---
 
-## Phase 3: User Story 1 - Compare explicit captures (Priority: P1)
+## Phase 2: Preserve metric availability during aggregation
 
-**Goal**: Add a local CLI command that compares two explicit capture paths through existing summarization.
-
-**Independent Test**: Synthetic baseline/candidate captures produce the expected eight deterministic text deltas.
+**Purpose**: Distinguish an observed zero from unavailable/incomplete telemetry using fixed-size provider-neutral state.
 
 ### Tests
 
-- [ ] T005 [P] [US1] Add CLI tests for two valid explicit capture paths, identical runs, increases, decreases, and zero values
-- [ ] T006 [P] [US1] Add CLI error tests for missing/unreadable/invalid baseline and candidate inputs, asserting non-zero exit, no traceback, no payloads, and no absolute-path disclosure
+- [ ] T003 Add focused failing tests for `model_requests` availability across API-request events, OTEL-metric fallback, and no-usage captures
+- [ ] T004 Add independent availability tests for estimated cost, input tokens, and output tokens, including partial OTEL metric series
+- [ ] T005 Add availability tests for tool calls/failures on log-backed versus metrics-only captures
+- [ ] T006 Add tool-result-byte tests where one or more counted tool calls lack result-size evidence
+- [ ] T007 Add session-compaction availability tests for lifecycle/log-backed versus metrics-only captures
+- [ ] T008 Assert observed numeric zero remains available while missing telemetry remains unavailable
 
 ### Implementation
 
-- [ ] T007 [US1] Add `capt trace compare BASELINE CANDIDATE` to `src/coding_agent_performance/trace/cli.py` using existing `summarize_capture()` for each input
-- [ ] T008 [US1] Reuse or minimally extract existing summarize error mapping only if needed to avoid meaningful duplication; preserve existing `trace summarize` behavior exactly
-- [ ] T009 [US1] Add deterministic text comparison rendering in the existing rendering boundary with the fixed metric order
+- [ ] T009 Add the smallest immutable provider-neutral availability DTO/fields needed for the eight slots
+- [ ] T010 Extend existing accumulators with fixed-size availability/completeness state; do not retain raw records or introduce a registry
+- [ ] T011 Attach availability to the internal immutable summary domain result while keeping existing `trace summarize` renderers/schema version unchanged
+- [ ] T012 Add compatibility tests proving current trace-summary text/JSON output is unchanged by the internal metadata
 
-**Checkpoint**: `capt trace compare baseline.jsonl candidate.jsonl` is independently usable and local-only
+**Checkpoint**: `TraceSummary` can distinguish observed zero from unavailable evidence for all eight comparison slots without changing its public rendered contract.
 
 ---
 
-## Phase 4: User Story 2 - Structured JSON comparison (Priority: P2)
+## Phase 3: Foundational comparison model
 
-**Goal**: Expose the same comparison evidence as a stable allowlisted JSON contract.
+- [ ] T013 Add failing unit tests for the fixed `MetricComparison`/`TraceComparison` contract
+- [ ] T014 Implement immutable comparison DTOs and pure `compare_summaries()` in `src/coding_agent_performance/trace/comparison.py`
+- [ ] T015 Verify fixed order and `delta == candidate - baseline` only when both sides are available
+- [ ] T016 Verify either-side unavailability yields an explicit unavailable slot and no numeric delta
 
-**Independent Test**: `--format json` returns the same eight baseline/candidate/delta values as text evidence.
+**Checkpoint**: Two immutable summaries can be compared without CLI, provider, or rendering dependencies.
+
+---
+
+## Phase 4: User Story 1 - Compare explicit captures (Priority: P1)
 
 ### Tests
 
-- [ ] T010 [P] [US2] Add JSON serialization tests for schema version, fixed field order, exact values, negative/positive/zero deltas, and repeated deterministic serialization
-- [ ] T011 [P] [US2] Add text/JSON agreement and privacy tests ensuring successful output omits capture paths, identifiers, and raw telemetry content
+- [ ] T017 [P] [US1] Add CLI tests for two explicit captures with identical, increased, decreased, observed-zero, and mixed-availability metrics
+- [ ] T018 [P] [US1] Add CLI error tests for missing/unreadable/invalid baseline and candidate inputs, asserting non-zero exit, no traceback, no payloads, and no absolute-path disclosure
 
 ### Implementation
 
-- [ ] T012 [US2] Add JSON rendering for `TraceComparison` using the explicit allowlist from `plan.md`; do not serialize dataclasses dynamically or discover metrics at runtime
-- [ ] T013 [US2] Wire the existing `--format text|json` pattern into `trace compare`
+- [ ] T019 [US1] Add `capt trace compare BASELINE CANDIDATE` using existing `summarize_capture()` for each input
+- [ ] T020 [US1] Reuse or minimally extract existing summarize error mapping only when needed; preserve current `trace summarize` behavior
+- [ ] T021 [US1] Add deterministic text comparison rendering with fixed metric order and explicit unavailable state
 
-**Checkpoint**: Text and JSON are semantically equivalent and deterministic
+**Checkpoint**: `capt trace compare baseline.jsonl candidate.jsonl` is independently usable, local-only, and never fabricates deltas from unavailable telemetry.
+
+---
+
+## Phase 5: User Story 2 - Structured JSON comparison (Priority: P2)
+
+### Tests
+
+- [ ] T022 [P] [US2] Add JSON tests for schema version, fixed field order, available numeric slots, unavailable nullable slots, and deterministic serialization
+- [ ] T023 [P] [US2] Add text/JSON agreement and privacy tests ensuring output omits capture paths, identifiers, provider provenance, and raw telemetry
+
+### Implementation
+
+- [ ] T024 [US2] Add explicit allowlisted JSON rendering; do not serialize dataclasses dynamically or discover metrics at runtime
+- [ ] T025 [US2] Wire the existing `--format text|json` pattern into `trace compare`
 
 ---
 
-## Phase 5: Documentation and validation
+## Phase 6: Documentation and validation
 
-- [ ] T014 [P] Document `capt trace compare` and its eight metrics in `docs/product.md`, `docs/architecture.md`, and the appropriate public output/summary-format documentation without duplicating the full feature spec
-- [ ] T015 [P] Confirm no existing summary schema/version, insight semantics, provider adapters, or capture contracts changed
-- [ ] T016 [P] Confirm all fixtures/examples are synthetic and comparison output/error messages remain allowlisted
-- [ ] T017 Run `uv sync --frozen --all-groups`, `uv run ruff format --check .`, `uv run ruff check .`, `uv run ty check`, `uv run pytest`, `uv build --clear`, and `git diff --check`
-
----
+- [ ] T026 [P] Document `capt trace compare`, the eight fixed slots, and unavailable semantics in product/architecture/public-format docs without duplicating the full feature spec
+- [ ] T027 [P] Confirm no existing summary JSON schema/version, insight semantics, provider adapters, or capture contracts changed
+- [ ] T028 [P] Confirm all fixtures/examples are synthetic and comparison output/error messages remain allowlisted
+- [ ] T029 Run `uv sync --frozen --all-groups`, `uv run ruff format --check .`, `uv run ruff check .`, `uv run ty check`, `uv run pytest`, `uv build --clear`, and `git diff --check`
 
 ## Notes
 
 - Issue #36 is the single operational implementation task after specification approval.
-- The spec is the behavioral source of truth; the plan is the technical design; this file is the work decomposition; `analyze.md` is review evidence only.
-- Do not add percentage deltas in v1.
-- Do not introduce a metric registry, generic experiment abstraction, protocol hierarchy, or provider-specific comparison path.
+- The spec is behavioral authority; the plan is technical design; this file is work decomposition; `analyze.md` is review evidence only.
+- Do not infer availability from `value == 0` or `value != 0`.
+- Do not add percentages, scoring, recommendations, a metric registry, generic experiment abstraction, protocol hierarchy, or provider-specific comparison path.
 - `/speckit.taskstoissues` and `/speckit.implement` are not part of the CAPT production lifecycle.
