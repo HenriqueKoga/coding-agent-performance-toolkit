@@ -27,7 +27,7 @@ from agent_dispatch import (
     validate_dispatch_preconditions,
 )
 from agent_lifecycle import GitHubApiResponse, plan_lifecycle
-from agent_spec import ApprovedSpec, GITHUB_ACTIONS_BOT_LOGIN, GITHUB_ACTIONS_BOT_TYPE, IssueComment
+from agent_spec import GITHUB_ACTIONS_BOT_LOGIN, GITHUB_ACTIONS_BOT_TYPE, ApprovedSpec, IssueComment
 from cursor_agents import AGENT_ID_CONFLICT
 
 SECRET = "cursor-test-key-invalid"
