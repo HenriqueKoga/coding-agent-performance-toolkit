@@ -2,6 +2,9 @@
 
 Closes #
 
+Agent Task implementation PRs must keep exactly one standalone `Closes #<issue>` line.
+Specification or other non-Agent-Task review PRs must not use `Closes #<issue>`. Replace this section with a standalone `<!-- capt-lifecycle: ignore -->` line and a `Related to #<issue>` line. Do not combine that marker with `Closes #<issue>`. That marker opts the pull request out of Agent Task lifecycle bookkeeping only; CI, Codex, and branch protection still apply.
+
 ## Summary
 
 ## Motivation
