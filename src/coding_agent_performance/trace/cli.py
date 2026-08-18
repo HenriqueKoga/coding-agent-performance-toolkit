@@ -17,10 +17,13 @@ from coding_agent_performance.trace.collector import (
     OtlpHttpCollector,
 )
 from coding_agent_performance.trace.comparison import compare_summaries
+from coding_agent_performance.trace.handoff import handoff_from_summary
 from coding_agent_performance.trace.rendering import (
     render_capture_list,
     render_comparison_json,
     render_comparison_text,
+    render_handoff_json,
+    render_handoff_text,
     render_json,
     render_text,
 )
@@ -39,7 +42,7 @@ from coding_agent_performance.trace.summary import summarize_capture
 
 trace_app = typer.Typer(
     name="trace",
-    help="Collect, list, summarize, and compare coding-agent telemetry.",
+    help="Collect, list, summarize, compare, and handoff coding-agent telemetry.",
     no_args_is_help=True,
     add_completion=False,
 )
@@ -132,6 +135,34 @@ def compare(
     typer.echo(render_comparison_text(result))
 
 
+@trace_app.command(
+    "handoff",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def handoff(
+    ctx: typer.Context,
+    capture: Annotated[
+        Path,
+        typer.Argument(help="CAPT JSONL capture file."),
+    ],
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--format", help="Handoff output format."),
+    ] = OutputFormat.TEXT,
+) -> None:
+    """Export a compact evidence handoff from a local CAPT capture."""
+    if ctx.args:
+        typer.echo("Provide exactly one capture path.", err=True)
+        raise typer.Exit(1) from None
+    summary = handoff_capture_or_fail(capture)
+    artifact = handoff_from_summary(summary)
+    if output_format is OutputFormat.JSON:
+        sys.stdout.write(render_handoff_json(artifact))
+        sys.stdout.write("\n")
+        return
+    typer.echo(render_handoff_text(artifact))
+
+
 def summarize_or_fail(path: Path) -> TraceSummary:
     try:
         return summarize_capture(path)
@@ -142,6 +173,25 @@ def summarize_or_fail(path: Path) -> TraceSummary:
         detail = exc.strerror or str(exc) or "read error"
         typer.echo(f"Invalid capture at {path.name}: {detail}", err=True)
         raise typer.Exit(1) from None
+
+
+def handoff_capture_or_fail(path: Path) -> TraceSummary:
+    try:
+        return summarize_capture(path)
+    except CaptureError as exc:
+        location = path.name if exc.line is None else f"{path.name}:{exc.line}"
+        typer.echo(f"Invalid capture at {location}: {_handoff_error_reason(exc.reason)}", err=True)
+        raise typer.Exit(1) from None
+    except OSError as exc:
+        detail = exc.strerror or str(exc) or "read error"
+        typer.echo(f"Invalid capture at {path.name}: {detail}", err=True)
+        raise typer.Exit(1) from None
+
+
+def _handoff_error_reason(reason: str) -> str:
+    if reason.startswith("unsupported schema_version"):
+        return "unsupported schema_version"
+    return reason
 
 
 def same_capture_file(left: Path, right: Path) -> bool:

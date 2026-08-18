@@ -29,6 +29,7 @@ def test_trace_help(visible: Callable[[str], str]) -> None:
     assert "list" in text
     assert "summarize" in text
     assert "compare" in text
+    assert "handoff" in text
 
 
 def test_trace_collect_help(visible: Callable[[str], str]) -> None:

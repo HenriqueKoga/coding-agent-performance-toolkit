@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from coding_agent_performance.trace.comparison import COMPARISON_SCHEMA_VERSION, MetricComparison, TraceComparison
+from coding_agent_performance.trace.handoff import TraceHandoff
 from coding_agent_performance.trace.report import (
     CompactionPressure,
     DominantTool,
@@ -242,6 +243,83 @@ def render_comparison_json(comparison: TraceComparison) -> str:
     return json.dumps(comparison_to_dict(comparison), indent=2, allow_nan=False, ensure_ascii=False)
 
 
+def handoff_to_dict(handoff: TraceHandoff) -> dict[str, object]:
+    """Serialize a compact handoff through an explicit field allowlist."""
+    return {
+        "schema_version": handoff.schema_version,
+        "capture": {
+            "source": handoff.capture.source,
+            "file": handoff.capture.file,
+        },
+        "sessions": {
+            "count": handoff.sessions.count,
+            "prompts": handoff.sessions.prompts,
+            "assistant_responses": handoff.sessions.assistant_responses,
+            "compactions": handoff.sessions.compactions,
+            "subagents_completed": handoff.sessions.subagents_completed,
+        },
+        "model_usage": {
+            "usage_source": handoff.model_usage.usage_source,
+            "requests": handoff.model_usage.requests,
+            "errors": handoff.model_usage.errors,
+            "refusals": handoff.model_usage.refusals,
+            "estimated_cost_usd_micros": handoff.model_usage.estimated_cost_usd_micros,
+            "tokens": {
+                "input": handoff.model_usage.tokens.input,
+                "output": handoff.model_usage.tokens.output,
+            },
+        },
+        "tools": {
+            "calls": handoff.tools.calls,
+            "successes": handoff.tools.successes,
+            "failures": handoff.tools.failures,
+            "result_bytes": handoff.tools.result_bytes,
+            "success_rate_bps": handoff.tools.success_rate_bps,
+        },
+        "insights": _insights_dict(handoff.insights),
+    }
+
+
+def render_handoff_json(handoff: TraceHandoff) -> str:
+    return json.dumps(handoff_to_dict(handoff), indent=2, allow_nan=False, ensure_ascii=False)
+
+
+def render_handoff_text(handoff: TraceHandoff) -> str:
+    usage = handoff.model_usage
+    tools = handoff.tools
+    sessions = handoff.sessions
+    sections = [
+        "Handoff",
+        f"  Source:          {escape_filename(handoff.capture.source)}",
+        f"  File:            {escape_filename(handoff.capture.file)}",
+        f"  Sessions:        {sessions.count}",
+        f"  Prompts:         {sessions.prompts}",
+        f"  Assistant responses: {sessions.assistant_responses}",
+        f"  Compactions:     {sessions.compactions}",
+        f"  Subagents completed: {sessions.subagents_completed}",
+        "",
+        "Model usage",
+        f"  Usage source:    {_USAGE_SOURCE_LABELS[usage.usage_source]}",
+        f"  Requests:        {usage.requests}",
+        f"  Errors:          {usage.errors}",
+        f"  Refusals:        {usage.refusals}",
+        f"  Estimated cost:  {_usd(usage.estimated_cost_usd_micros)}",
+        f"  Input tokens:    {_count(usage.tokens.input)}",
+        f"  Output tokens:   {_count(usage.tokens.output)}",
+        "",
+        "Tools",
+        f"  Calls:           {tools.calls}",
+        f"  Successes:       {tools.successes}",
+        f"  Failures:        {tools.failures}",
+        f"  Result bytes:    {_count(tools.result_bytes)}",
+        f"  Success rate:    {_bps_percent(tools.success_rate_bps)}",
+    ]
+    insight_lines = _insight_lines(handoff.insights, escape_untrusted=True)
+    if insight_lines:
+        sections.extend(["", "Insights", *insight_lines])
+    return "\n".join(sections)
+
+
 def render_comparison_text(comparison: TraceComparison) -> str:
     return "\n".join(
         [
@@ -366,18 +444,26 @@ def _seconds(value: int | float) -> str:
     return f"{value / 1000:.2f}s"
 
 
-def _insight_lines(insights: Insights) -> list[str]:
+def _insight_lines(insights: Insights, *, escape_untrusted: bool = False) -> list[str]:
+    def display_name(value: str) -> str:
+        if escape_untrusted:
+            return escape_filename(value)
+        return value
+
     lines: list[str] = []
     _append_insight_group(
         lines,
         "Repeated tool calls",
-        tuple(f"- {finding.tool_name}: {finding.call_count} calls" for finding in insights.repeated_tool_calls),
+        tuple(
+            f"- {display_name(finding.tool_name)}: {finding.call_count} calls"
+            for finding in insights.repeated_tool_calls
+        ),
     )
     _append_insight_group(
         lines,
         "Repeated failed tool calls",
         tuple(
-            f"- {finding.tool_name}: {finding.failure_count} failures"
+            f"- {display_name(finding.tool_name)}: {finding.failure_count} failures"
             for finding in insights.repeated_failed_tool_calls
         ),
     )
@@ -385,7 +471,7 @@ def _insight_lines(insights: Insights) -> list[str]:
         lines,
         "High tool result volume",
         tuple(
-            f"- {finding.tool_name}: {finding.result_bytes} result bytes"
+            f"- {display_name(finding.tool_name)}: {finding.result_bytes} result bytes"
             for finding in insights.high_tool_result_volume
         ),
     )
@@ -394,7 +480,7 @@ def _insight_lines(insights: Insights) -> list[str]:
         "High tool failure rate",
         tuple(
             (
-                f"- {finding.tool_name}: {finding.failed_calls} failed of "
+                f"- {display_name(finding.tool_name)}: {finding.failed_calls} failed of "
                 f"{finding.total_calls} calls "
                 f"({finding.failure_rate.numerator}/{finding.failure_rate.denominator})"
             )
@@ -406,7 +492,10 @@ def _insight_lines(insights: Insights) -> list[str]:
         _append_insight_group(
             lines,
             "Dominant tool",
-            (f"- {finding.tool_name}: {finding.call_count}/{finding.total_calls} calls ({finding.share_percent}%)",),
+            (
+                f"- {display_name(finding.tool_name)}: "
+                f"{finding.call_count}/{finding.total_calls} calls ({finding.share_percent}%)",
+            ),
         )
     if insights.compaction_pressure is not None:
         finding = insights.compaction_pressure

@@ -35,6 +35,7 @@ In scope today:
 - Incremental, deterministic text and JSON summaries, including capture-level tool execution counts and an integer basis-point success rate
 - Deterministic insight rules for repeated tool calls, repeated failed tool calls, high cumulative tool result volume, high tool failure rate, dominant tool usage, compaction pressure, and subagent usage
 - Deterministic comparison of two explicit local captures, with per-metric availability so missing telemetry is never treated as observed zero
+- Deterministic compact handoff export from one explicit local capture, using a closed capture-source allowlist and a versioned JSON v1 contract independent from summary and comparison schemas
 
 Out of scope today:
 
@@ -65,6 +66,7 @@ Claude Code
           -> immutable TraceSummary
           -> InsightAnalyzer
           -> optional TraceComparison of two summaries
+          -> optional TraceHandoff compact extract
     -> text or JSON renderer
 ```
 
@@ -90,14 +92,15 @@ src/coding_agent_performance/
     trace/insights.py                   InsightAnalyzer and deterministic rules
     trace/summary.py                    Capture-to-summary use case
     trace/comparison.py                 Pure eight-metric comparison of two summaries
-    trace/rendering.py                  Allowlist JSON dict plus text/JSON summary, comparison, and capture-list output
+    trace/handoff.py                    Pure compact extract from TraceSummary
+    trace/rendering.py                  Allowlist JSON dict plus text/JSON summary, comparison, handoff, and capture-list output
 ```
 
 The Claude Code adapter knows official export configuration and how to map Claude Code log and metric names onto small domain records. It does not start Claude Code, edit `~/.claude/settings.json`, or keep prompt, response, or tool content.
 
 The collector does not know Claude Code. It accepts `POST /v1/logs` and `POST /v1/metrics`, persists the JSON object as received, and counts successful batches. It does not interpret OTLP resource attributes.
 
-Storage writes one compact JSON line per HTTP request. The reader validates those envelopes in streaming mode and never loads the whole file. `capt trace list` scans the default capture directory for eligible `.jsonl` files and prints filename, size in bytes, and UTC modification time without opening capture contents. Optional `--limit` prints a prefix of that newest-first listing. `capt trace summarize` accepts an explicit path or `--latest`, which selects the newest eligible `.jsonl` file in the default capture directory without following symbolic links. Listing and `--latest` share the same eligibility and newest-first ordering rules. `--latest` keeps a single running maximum; listing materializes the ordered set. `capt trace compare` takes exactly two explicit capture paths, summarizes each distinct filesystem object through the same bounded path, and reuses one immutable snapshot when both arguments resolve to the same file.
+Storage writes one compact JSON line per HTTP request. The reader validates those envelopes in streaming mode and never loads the whole file. `capt trace list` scans the default capture directory for eligible `.jsonl` files and prints filename, size in bytes, and UTC modification time without opening capture contents. Optional `--limit` prints a prefix of that newest-first listing. `capt trace summarize` accepts an explicit path or `--latest`, which selects the newest eligible `.jsonl` file in the default capture directory without following symbolic links. Listing and `--latest` share the same eligibility and newest-first ordering rules. `--latest` keeps a single running maximum; listing materializes the ordered set. `capt trace compare` takes exactly two explicit capture paths, summarizes each distinct filesystem object through the same bounded path, and reuses one immutable snapshot when both arguments resolve to the same file. `capt trace handoff` takes exactly one explicit capture path, summarizes it through that same bounded path, and copies a compact allowlist into `TraceHandoff`. Capture `source` is mapped through a closed identity sanitizer (`claude-code` or `unknown`) so an arbitrary envelope string cannot appear in the handoff. Handoff output is stdout-only.
 
 The OTLP decoder understands `AnyValue`, `resourceLogs`, and `resourceMetrics` only. It does not import the Claude Code adapter.
 
@@ -105,7 +108,7 @@ Normalization is allowlist-based. Session and prompt identifiers may exist in me
 
 Aggregation is incremental. Accumulators keep small duration lists for percentiles and metric series state for cumulative versus delta resolution. They do not materialize every envelope or raw attribute map.
 
-Text and JSON renderers consume the finished DTO only. Comparison rendering consumes `TraceComparison` only. JSON is written with `allow_nan=False`.
+Text and JSON renderers consume the finished DTO only. Comparison rendering consumes `TraceComparison` only. Handoff rendering consumes `TraceHandoff` only. JSON is written with `allow_nan=False`.
 
 Diagnostics still use only the standard library. Collection uses the standard library HTTP server plus `platformdirs` for the user state directory. Summary uses only the standard library.
 
@@ -144,7 +147,7 @@ Domain records live in `trace/records.py`. They carry only the fields required f
 
 ## Incremental summarizer
 
-`IncrementalSummarizer` orchestrates capture ingestion and finalization. Mutable aggregation state lives in cohesive accumulators for capture, session, usage, tool, metric, and coverage concerns. Each accumulator owns the operations that maintain its invariants and emits an immutable report DTO. Accumulators also keep fixed-size provider-neutral availability flags for comparison so missing telemetry is not inferred from a numeric zero. `InsightAnalyzer` then consumes provider-neutral summary evidence, currently `ToolStats` and `SessionStats`, and produces deterministic `Insights`. `capt trace compare` consumes two finished summaries plus that internal availability metadata. Rendering of `trace summarize` reads the finished `TraceSummary` only and does not expose availability.
+`IncrementalSummarizer` orchestrates capture ingestion and finalization. Mutable aggregation state lives in cohesive accumulators for capture, session, usage, tool, metric, and coverage concerns. Each accumulator owns the operations that maintain its invariants and emits an immutable report DTO. Accumulators also keep fixed-size provider-neutral availability flags for comparison so missing telemetry is not inferred from a numeric zero. `InsightAnalyzer` then consumes provider-neutral summary evidence, currently `ToolStats` and `SessionStats`, and produces deterministic `Insights`. `capt trace compare` consumes two finished summaries plus that internal availability metadata. `capt trace handoff` copies a compact allowlist from one finished summary, including existing insights unchanged. Rendering of `trace summarize` reads the finished `TraceSummary` only and does not expose availability. Rendering of `trace handoff` reads the finished `TraceHandoff` only.
 
 `api_request` events are the preferred source for tokens, cost, duration, model, and query source. If any remain after deduplication, token and cost metrics are ignored for those totals. Otherwise the summarizer falls back to `claude_code.token.usage` and `claude_code.cost.usage`.
 
@@ -173,7 +176,7 @@ Likely shape, kept high-level on purpose:
 
 1. **Ingestion.** Isolated adapters configure or read vendor-specific sources and emit raw captures. The Claude Code path is OTLP HTTP/JSON; other agents may differ.
 2. **Normalization.** A provider-independent layer turns raw envelopes into shared records. That layer does not live inside the HTTP receiver.
-3. **Domain.** Deterministic insight rules operate on immutable summary evidence through `InsightAnalyzer`. Repeated tool calls, repeated failed tool calls, high cumulative tool result volume, high tool failure rate, dominant tool usage, compaction pressure, and subagent usage are implemented. `capt trace compare` reports signed integer deltas across two summaries for a fixed eight-metric allowlist. Future rules may detect loops, redundant calls, oversized individual outputs, and later support a Context Ledger. New insight rules should extend the analyzer or remain small stateless functions; they should not add mutable state to report DTOs.
+3. **Domain.** Deterministic insight rules operate on immutable summary evidence through `InsightAnalyzer`. Repeated tool calls, repeated failed tool calls, high cumulative tool result volume, high tool failure rate, dominant tool usage, compaction pressure, and subagent usage are implemented. `capt trace compare` reports signed integer deltas across two summaries for a fixed eight-metric allowlist. `capt trace handoff` emits a compact v1 evidence extract from one summary. Future rules may detect loops, redundant calls, oversized individual outputs, and later support a Context Ledger. New insight rules should extend the analyzer or remain small stateless functions; they should not add mutable state to report DTOs.
 4. **Search.** Code search optimized for LLM consumption, still local.
 5. **Output.** Concise structured reports for humans and agents.
 
