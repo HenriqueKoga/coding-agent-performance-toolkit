@@ -6,8 +6,9 @@ This document describes the JSON object written to stdout. It is versioned by
 `schema_version` inside the payload. There is no formal JSON Schema in this
 release.
 
-The same file also documents `capt trace compare --format json`. That comparison
-contract has its own `schema_version` and does not change the summary schema.
+The same file also documents `capt trace compare --format json` and
+`capt trace handoff --format json`. Those contracts have their own
+`schema_version` values and do not change the summary schema.
 
 The summary is produced deterministically from a local CAPT JSONL capture. It
 does not call a model, score quality, or emit recommendations.
@@ -293,3 +294,72 @@ Availability is tracked per metric from normalized coverage, not from
 An observed numeric zero is comparable only when that metric has affirmative
 coverage proving zero. Text output uses the same eight slot names and the same
 availability and integer values as JSON.
+
+## Handoff format
+
+Pre-alpha contract for `capt trace handoff --format json`.
+
+The handoff schema version is independent from `TraceSummary.schema_version`
+and from comparison JSON. Current handoff `schema_version` is `1`.
+
+`capt trace handoff CAPTURE` summarizes one explicit local capture through the
+existing bounded path, then copies a compact allowlist into a `TraceHandoff`.
+JSON is the canonical structured representation. Text is the default CLI
+format and reports the same identity, aggregate values, and insight
+presence or absence. Output is stdout-only.
+
+The handoff is an evidence extract. It does not invent goals, TODOs,
+recommendations, or a next action. Insights are copied from the existing
+summary findings.
+
+### Privacy
+
+Successful handoff output may contain only filename, allowlisted capture
+`source` (`claude-code` or `unknown`), integer session/tool/model aggregates,
+`usage_source`, nullable tool success-rate basis points, and existing insight
+evidence fields. It never includes capture paths, session identifiers, prompt
+or assistant text, tool arguments or results, source code, arbitrary envelope
+`source` strings, or interpolated envelope field values.
+
+### Top-level object
+
+The only top-level keys, in this order:
+
+1. `schema_version`
+2. `capture`
+3. `sessions`
+4. `model_usage`
+5. `tools`
+6. `insights`
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `schema_version` | integer | Handoff document version. Must be `1`. |
+| `capture` | object | Safe identity only: `source` then `file` |
+| `sessions` | object | Five integer session counters |
+| `model_usage` | object | Scalar model-usage subset |
+| `tools` | object | Scalar tool subset |
+| `insights` | object | Existing summarize insight findings |
+
+`capture.source` is `claude-code` or `unknown`. Any other summary source is
+emitted as `unknown`. `capture.file` is a filename only.
+
+`sessions` contains exactly `count`, `prompts`, `assistant_responses`,
+`compactions`, and `subagents_completed`. `prompts` and `assistant_responses`
+are counts, never content.
+
+`model_usage` contains exactly `usage_source`, `requests`, `errors`,
+`refusals`, `estimated_cost_usd_micros`, and `tokens`. `tokens` contains
+exactly `input` then `output`. Cache-token totals, durations, and breakdowns
+are omitted.
+
+`tools` contains exactly `calls`, `successes`, `failures`, `result_bytes`,
+and `success_rate_bps`. `success_rate_bps` is an integer in `0`–`10000`, or
+JSON `null` when `calls` is `0`.
+
+`insights` uses the same keys and per-finding fields as summarize JSON.
+Array findings may be empty. `dominant_tool`, `compaction_pressure`, and
+`subagent_usage` are objects or `null`.
+
+Text uses the existing summarize labels for `usage_source` and the existing
+insight line wording. Missing tool success rate is shown as `n/a`.
