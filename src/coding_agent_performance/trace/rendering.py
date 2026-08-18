@@ -290,8 +290,8 @@ def render_handoff_text(handoff: TraceHandoff) -> str:
     sessions = handoff.sessions
     sections = [
         "Handoff",
-        f"  Source:          {handoff.capture.source}",
-        f"  File:            {handoff.capture.file}",
+        f"  Source:          {escape_filename(handoff.capture.source)}",
+        f"  File:            {escape_filename(handoff.capture.file)}",
         f"  Sessions:        {sessions.count}",
         f"  Prompts:         {sessions.prompts}",
         f"  Assistant responses: {sessions.assistant_responses}",
@@ -314,7 +314,7 @@ def render_handoff_text(handoff: TraceHandoff) -> str:
         f"  Result bytes:    {_count(tools.result_bytes)}",
         f"  Success rate:    {_bps_percent(tools.success_rate_bps)}",
     ]
-    insight_lines = _insight_lines(handoff.insights)
+    insight_lines = _insight_lines(handoff.insights, escape_untrusted=True)
     if insight_lines:
         sections.extend(["", "Insights", *insight_lines])
     return "\n".join(sections)
@@ -444,18 +444,26 @@ def _seconds(value: int | float) -> str:
     return f"{value / 1000:.2f}s"
 
 
-def _insight_lines(insights: Insights) -> list[str]:
+def _insight_lines(insights: Insights, *, escape_untrusted: bool = False) -> list[str]:
+    def display_name(value: str) -> str:
+        if escape_untrusted:
+            return escape_filename(value)
+        return value
+
     lines: list[str] = []
     _append_insight_group(
         lines,
         "Repeated tool calls",
-        tuple(f"- {finding.tool_name}: {finding.call_count} calls" for finding in insights.repeated_tool_calls),
+        tuple(
+            f"- {display_name(finding.tool_name)}: {finding.call_count} calls"
+            for finding in insights.repeated_tool_calls
+        ),
     )
     _append_insight_group(
         lines,
         "Repeated failed tool calls",
         tuple(
-            f"- {finding.tool_name}: {finding.failure_count} failures"
+            f"- {display_name(finding.tool_name)}: {finding.failure_count} failures"
             for finding in insights.repeated_failed_tool_calls
         ),
     )
@@ -463,7 +471,7 @@ def _insight_lines(insights: Insights) -> list[str]:
         lines,
         "High tool result volume",
         tuple(
-            f"- {finding.tool_name}: {finding.result_bytes} result bytes"
+            f"- {display_name(finding.tool_name)}: {finding.result_bytes} result bytes"
             for finding in insights.high_tool_result_volume
         ),
     )
@@ -472,7 +480,7 @@ def _insight_lines(insights: Insights) -> list[str]:
         "High tool failure rate",
         tuple(
             (
-                f"- {finding.tool_name}: {finding.failed_calls} failed of "
+                f"- {display_name(finding.tool_name)}: {finding.failed_calls} failed of "
                 f"{finding.total_calls} calls "
                 f"({finding.failure_rate.numerator}/{finding.failure_rate.denominator})"
             )
@@ -484,7 +492,10 @@ def _insight_lines(insights: Insights) -> list[str]:
         _append_insight_group(
             lines,
             "Dominant tool",
-            (f"- {finding.tool_name}: {finding.call_count}/{finding.total_calls} calls ({finding.share_percent}%)",),
+            (
+                f"- {display_name(finding.tool_name)}: "
+                f"{finding.call_count}/{finding.total_calls} calls ({finding.share_percent}%)",
+            ),
         )
     if insights.compaction_pressure is not None:
         finding = insights.compaction_pressure
