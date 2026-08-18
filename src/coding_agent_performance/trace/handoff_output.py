@@ -123,7 +123,7 @@ def _publish_replace(temp: Path, destination: Path) -> None:
 
 def _confirm_regular_file_nofollow(destination: Path) -> None:
     try:
-        fd = os.open(destination, os.O_WRONLY | _NOFOLLOW)
+        fd = os.open(destination, os.O_RDONLY | _NOFOLLOW)
     except FileNotFoundError:
         return
     except OSError as exc:

@@ -103,6 +103,16 @@ def test_overwrite_replaces_regular_file(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX file modes required")
+def test_overwrite_replaces_read_only_regular_file(tmp_path: Path) -> None:
+    destination = tmp_path / "handoff.txt"
+    destination.write_text("previous\n", encoding="utf-8")
+    os.chmod(destination, 0o444)
+    write_handoff_file(destination, _CONTENT, overwrite=True)
+    assert destination.read_text(encoding="utf-8") == _CONTENT
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o600
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes required")
 def test_replaced_file_uses_posix_0600(tmp_path: Path) -> None:
     destination = tmp_path / "handoff.txt"
     destination.write_text("previous\n", encoding="utf-8")
@@ -213,7 +223,7 @@ def _patch_nofollow_open(
     real_open = os.open
 
     def open_maybe(path: str | bytes | os.PathLike[str], flags: int, mode: int = 0o777) -> int:
-        if flags == os.O_WRONLY | os.O_NOFOLLOW:
+        if flags == os.O_RDONLY | os.O_NOFOLLOW:
             if unlink:
                 Path(os.fsdecode(path)).unlink()
             raise OSError(errno_code, strerror)
