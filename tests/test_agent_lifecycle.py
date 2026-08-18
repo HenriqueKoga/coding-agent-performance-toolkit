@@ -7,10 +7,12 @@ import pytest
 
 import agent_lifecycle
 from agent_lifecycle import (
+    LIFECYCLE_OPT_OUT_MARKER,
     GitHubApiResponse,
     LifecycleError,
     LifecyclePlan,
     github_http_status_from_stderr,
+    has_lifecycle_opt_out,
     is_retryable_github_http_status,
     main,
     parse_linked_issue_number,
@@ -60,6 +62,73 @@ def test_parse_rejects_ambiguous_links() -> None:
 def test_parse_ignores_inline_and_natural_language_references() -> None:
     with pytest.raises(LifecycleError, match="does not contain a supported Closes"):
         parse_linked_issue_number("This Closes #8 in passing.\nSee issue 8.\n")
+
+
+def test_opt_out_marker_is_recognized_on_standalone_line() -> None:
+    body = (
+        "## Linked task\n\n"
+        f"{LIFECYCLE_OPT_OUT_MARKER}\n\n"
+        "Related to #36. This specification PR intentionally does not close the implementation Issue.\n"
+    )
+    assert has_lifecycle_opt_out(body) is True
+    with pytest.raises(LifecycleError, match="opts out of Agent Task lifecycle") as exc_info:
+        parse_linked_issue_number(body)
+    assert "36" not in str(exc_info.value)
+    assert SECRET not in str(exc_info.value)
+
+
+def test_opt_out_marker_is_idempotent_for_duplicates() -> None:
+    body = f"{LIFECYCLE_OPT_OUT_MARKER}\n{LIFECYCLE_OPT_OUT_MARKER}\n"
+    assert has_lifecycle_opt_out(body) is True
+
+
+def test_opt_out_marker_accepts_crlf_and_surrounding_whitespace() -> None:
+    body = f"## Linked task\r\n\r\n  {LIFECYCLE_OPT_OUT_MARKER}  \r\nRelated to #36\r\n"
+    assert has_lifecycle_opt_out(body) is True
+
+
+def test_opt_out_is_not_inferred_from_related_link_or_docs_title() -> None:
+    body = "## Linked task\n\nRelated to #36\n\n## Summary\ndocs: specify a feature\n"
+    assert has_lifecycle_opt_out(body) is False
+    with pytest.raises(LifecycleError, match="does not contain a supported Closes"):
+        parse_linked_issue_number(body)
+
+
+def test_inline_or_backticked_opt_out_marker_does_not_opt_out() -> None:
+    body = (
+        f"Use `{LIFECYCLE_OPT_OUT_MARKER}` on its own line.\n"
+        f"Do not write {LIFECYCLE_OPT_OUT_MARKER} inline.\n"
+        "Related to #36\n"
+    )
+    assert has_lifecycle_opt_out(body) is False
+    with pytest.raises(LifecycleError, match="does not contain a supported Closes"):
+        parse_linked_issue_number(body)
+
+
+def test_invalid_lifecycle_marker_fails_closed() -> None:
+    body = "<!-- capt-lifecycle: skip -->\nRelated to #36\n"
+    with pytest.raises(LifecycleError, match="invalid or ambiguous capt-lifecycle marker") as exc_info:
+        has_lifecycle_opt_out(body)
+    assert "36" not in str(exc_info.value)
+    assert "skip" not in str(exc_info.value)
+    assert SECRET not in str(exc_info.value)
+
+
+def test_ambiguous_lifecycle_marker_with_ignore_and_other_directive_fails() -> None:
+    body = f"{LIFECYCLE_OPT_OUT_MARKER}\n<!-- capt-lifecycle: apply -->\nCloses #8\n"
+    with pytest.raises(LifecycleError, match="invalid or ambiguous capt-lifecycle marker") as exc_info:
+        has_lifecycle_opt_out(body)
+    assert "8" not in str(exc_info.value)
+    with pytest.raises(LifecycleError, match="invalid or ambiguous capt-lifecycle marker"):
+        parse_linked_issue_number(body)
+
+
+def test_opt_out_wins_over_closes_link_and_does_not_expose_issue() -> None:
+    body = f"{LIFECYCLE_OPT_OUT_MARKER}\n\nCloses #36\n"
+    assert has_lifecycle_opt_out(body) is True
+    with pytest.raises(LifecycleError, match="opts out of Agent Task lifecycle") as exc_info:
+        parse_linked_issue_number(body)
+    assert "36" not in str(exc_info.value)
 
 
 def test_opened_ready_issue_moves_to_working_and_copies_risk() -> None:
@@ -166,6 +235,96 @@ def test_cli_parse_link_and_plan(tmp_path: Path) -> None:
     assert plan["pr_add"] == ["risk:low"]
     assert plan["noop"] is False
     assert SECRET not in stdout.getvalue()
+
+
+def test_cli_opt_out_spec_pr_succeeds_without_issue_access(tmp_path: Path) -> None:
+    event = _event_file(
+        tmp_path,
+        "opened",
+        (f"## Linked task\n\n{LIFECYCLE_OPT_OUT_MARKER}\n\nRelated to #36\nsecret {SECRET}\n"),
+    )
+    stdout = StringIO()
+    assert main(["opt-out", "--event-file", str(event)], stdout=stdout) == 0
+    payload = json.loads(stdout.getvalue())
+    assert payload == {
+        "opt_out": True,
+        "message": "pull request opted out of Agent Task lifecycle; no label changes",
+    }
+    assert SECRET not in stdout.getvalue()
+    assert "36" not in stdout.getvalue()
+
+    stdout = StringIO()
+    assert main(["parse-link", "--event-file", str(event)], stdout=stdout) == 1
+    assert stdout.getvalue() == ""
+
+
+def test_cli_opt_out_false_for_agent_task_pr(tmp_path: Path) -> None:
+    event = _event_file(tmp_path, "opened", "## Linked task\n\nCloses #8\n")
+    stdout = StringIO()
+    assert main(["opt-out", "--event-file", str(event)], stdout=stdout) == 0
+    assert json.loads(stdout.getvalue()) == {"opt_out": False}
+
+
+def test_cli_malformed_non_opted_out_pr_still_fails(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    event = _event_file(tmp_path, "opened", f"Related to #36\nsecret {SECRET}\n")
+    stdout = StringIO()
+    assert main(["opt-out", "--event-file", str(event)], stdout=stdout) == 0
+    assert json.loads(stdout.getvalue()) == {"opt_out": False}
+    assert main(["parse-link", "--event-file", str(event)]) == 1
+    captured = capsys.readouterr()
+    assert "does not contain a supported Closes" in captured.err
+    assert SECRET not in captured.err
+    assert "36" not in captured.err
+
+
+def test_cli_invalid_marker_fails_without_planning(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    event = _event_file(tmp_path, "opened", f"<!-- capt-lifecycle: ignored -->\nCloses #8\nsecret {SECRET}\n")
+    stdout = StringIO()
+    assert main(["opt-out", "--event-file", str(event)], stdout=stdout) == 1
+    captured = capsys.readouterr()
+    assert stdout.getvalue() == ""
+    assert "invalid or ambiguous capt-lifecycle marker" in captured.err
+    assert SECRET not in captured.err
+    assert "ignored" not in captured.err
+    assert (
+        main(
+            [
+                "plan",
+                "--event-file",
+                str(event),
+                "--issue-labels-json",
+                '["agent:ready", "risk:low"]',
+                "--pr-labels-json",
+                "[]",
+            ]
+        )
+        == 1
+    )
+
+
+def test_cli_opt_out_plan_does_not_mutate_linked_issue(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    event = _event_file(tmp_path, "opened", f"{LIFECYCLE_OPT_OUT_MARKER}\nCloses #36\n")
+    stdout = StringIO()
+    assert (
+        main(
+            [
+                "plan",
+                "--event-file",
+                str(event),
+                "--issue-labels-json",
+                '["agent:ready", "risk:medium"]',
+                "--pr-labels-json",
+                "[]",
+            ],
+            stdout=stdout,
+        )
+        == 1
+    )
+    captured = capsys.readouterr()
+    assert stdout.getvalue() == ""
+    assert "opts out of Agent Task lifecycle" in captured.err
+    assert "agent:working" not in captured.err
+    assert "36" not in captured.err
 
 
 def test_cli_missing_link_fails_without_body(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -592,3 +751,26 @@ def test_workflow_uses_rest_issue_read_not_graphql() -> None:
     assert "read-issue-labels" in workflow
     assert "graphql" not in workflow.lower()
     assert "synchronize" not in workflow
+
+
+def test_workflow_checks_opt_out_before_issue_reads_or_mutations() -> None:
+    workflow = Path(".github/workflows/agent-lifecycle.yml").read_text(encoding="utf-8")
+    opt_out_at = workflow.index("agent_lifecycle.py opt-out --event-file")
+    parse_link_at = workflow.index("agent_lifecycle.py parse-link --event-file")
+    read_labels_at = workflow.index("read-issue-labels")
+    issue_edit_at = workflow.index("gh issue edit")
+    pr_edit_at = workflow.index("gh pr edit")
+    assert opt_out_at < parse_link_at < read_labels_at < issue_edit_at < pr_edit_at
+    assert '$(jq -r \'.opt_out\' <<<"${decision}")" == "true"' in workflow
+    assert "exit 0" in workflow[opt_out_at:parse_link_at]
+    assert "CURSOR_API_KEY" not in workflow
+    assert "api.cursor.com" not in workflow
+
+
+def test_pull_request_template_keeps_closes_contract_and_documents_opt_out() -> None:
+    template = Path(".github/pull_request_template.md").read_text(encoding="utf-8")
+    assert "Closes #" in template
+    assert LIFECYCLE_OPT_OUT_MARKER in template
+    assert has_lifecycle_opt_out(template) is False
+    with pytest.raises(LifecycleError, match="does not contain a supported Closes"):
+        parse_linked_issue_number(template)

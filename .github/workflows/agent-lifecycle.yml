@@ -40,6 +40,12 @@ jobs:
         run: |
           set -euo pipefail
 
+          decision="$(python .github/scripts/agent_lifecycle.py opt-out --event-file "${GITHUB_EVENT_PATH}")"
+          if [[ "$(jq -r '.opt_out' <<<"${decision}")" == "true" ]]; then
+            jq -r '.message' <<<"${decision}"
+            exit 0
+          fi
+
           issue="$(python .github/scripts/agent_lifecycle.py parse-link --event-file "${GITHUB_EVENT_PATH}")"
 
           issue_labels_json="$(
