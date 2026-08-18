@@ -43,7 +43,7 @@ def test_exclusive_publish_collision_uses_basename(tmp_path: Path, monkeypatch: 
         raise FileExistsError(errno.EEXIST, "File exists")
 
     monkeypatch.setattr(os, publish, exists)
-    with pytest.raises(HandoffOutputError, match="Handoff file already exists: handoff.txt") as exc_info:
+    with pytest.raises(HandoffOutputError, match=r"Handoff file already exists: handoff\.txt") as exc_info:
         write_handoff_file(destination, _CONTENT, overwrite=False)
     assert not destination.exists()
     assert _temp_siblings(tmp_path) == []
@@ -86,7 +86,7 @@ def test_successful_publish_does_not_rollback_if_temp_unlink_fails(
 def test_existing_regular_file_without_overwrite_is_unchanged(tmp_path: Path) -> None:
     destination = tmp_path / "handoff.txt"
     destination.write_text("previous\n", encoding="utf-8")
-    with pytest.raises(HandoffOutputError, match="Handoff file already exists: handoff.txt") as exc_info:
+    with pytest.raises(HandoffOutputError, match=r"Handoff file already exists: handoff\.txt") as exc_info:
         write_handoff_file(destination, _CONTENT, overwrite=False)
     assert destination.read_text(encoding="utf-8") == "previous\n"
     assert _temp_siblings(tmp_path) == []
@@ -207,18 +207,26 @@ def test_does_not_follow_destination_by_resolving(tmp_path: Path, monkeypatch: p
     assert destination.read_text(encoding="utf-8") == _CONTENT
 
 
+def _patch_nofollow_open(
+    monkeypatch: pytest.MonkeyPatch, *, errno_code: int, strerror: str, unlink: bool = False
+) -> None:
+    real_open = os.open
+
+    def open_maybe(path: str | bytes | os.PathLike[str], flags: int, mode: int = 0o777) -> int:
+        if flags == os.O_WRONLY | os.O_NOFOLLOW:
+            if unlink:
+                Path(os.fsdecode(path)).unlink()
+            raise OSError(errno_code, strerror)
+        return real_open(path, flags, mode)
+
+    monkeypatch.setattr(os, "open", open_maybe)
+
+
 @pytest.mark.skipif(os.name != "posix" or not hasattr(os, "O_NOFOLLOW"), reason="O_NOFOLLOW required")
 def test_force_replace_maps_eloop_to_symlink(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     destination = tmp_path / "handoff.txt"
     destination.write_text("old\n", encoding="utf-8")
-    real_open = os.open
-
-    def open_maybe(path: object, flags: int, *args: object, **kwargs: object) -> int:
-        if flags == os.O_WRONLY | os.O_NOFOLLOW:
-            raise OSError(errno.ELOOP, "Too many levels of symbolic links")
-        return real_open(path, flags, *args, **kwargs)
-
-    monkeypatch.setattr(os, "open", open_maybe)
+    _patch_nofollow_open(monkeypatch, errno_code=errno.ELOOP, strerror="Too many levels of symbolic links")
     with pytest.raises(HandoffOutputError, match="path is a symbolic link"):
         write_handoff_file(destination, _CONTENT, overwrite=True)
     assert destination.read_text(encoding="utf-8") == "old\n"
@@ -229,14 +237,7 @@ def test_force_replace_maps_eloop_to_symlink(tmp_path: Path, monkeypatch: pytest
 def test_force_replace_maps_eisdir_to_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     destination = tmp_path / "handoff.txt"
     destination.write_text("old\n", encoding="utf-8")
-    real_open = os.open
-
-    def open_maybe(path: object, flags: int, *args: object, **kwargs: object) -> int:
-        if flags == os.O_WRONLY | os.O_NOFOLLOW:
-            raise OSError(errno.EISDIR, "Is a directory")
-        return real_open(path, flags, *args, **kwargs)
-
-    monkeypatch.setattr(os, "open", open_maybe)
+    _patch_nofollow_open(monkeypatch, errno_code=errno.EISDIR, strerror="Is a directory")
     with pytest.raises(HandoffOutputError, match="path is a directory"):
         write_handoff_file(destination, _CONTENT, overwrite=True)
     assert destination.read_text(encoding="utf-8") == "old\n"
@@ -246,14 +247,6 @@ def test_force_replace_maps_eisdir_to_directory(tmp_path: Path, monkeypatch: pyt
 def test_force_replace_allows_vanished_regular_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     destination = tmp_path / "handoff.txt"
     destination.write_text("old\n", encoding="utf-8")
-    real_open = os.open
-
-    def open_maybe(path: object, flags: int, *args: object, **kwargs: object) -> int:
-        if flags == os.O_WRONLY | os.O_NOFOLLOW:
-            Path(str(path)).unlink()
-            raise FileNotFoundError(errno.ENOENT, "No such file or directory")
-        return real_open(path, flags, *args, **kwargs)
-
-    monkeypatch.setattr(os, "open", open_maybe)
+    _patch_nofollow_open(monkeypatch, errno_code=errno.ENOENT, strerror="No such file or directory", unlink=True)
     write_handoff_file(destination, _CONTENT, overwrite=True)
     assert destination.read_text(encoding="utf-8") == _CONTENT

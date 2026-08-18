@@ -14,4 +14,3 @@ def test_readme_does_not_claim_insights_are_absent() -> None:
     lowered = README.lower()
     assert "does not yet produce performance insights" not in lowered
     assert "or generate insights" not in lowered
-    assert "does **not** inspect Claude Code transcripts, persist data in a database, score sessions, or generate insights" not in README

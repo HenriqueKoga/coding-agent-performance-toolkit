@@ -19,8 +19,8 @@ class HandoffOutputError(Exception):
 
 def write_handoff_file(path: Path, content: str, *, overwrite: bool) -> None:
     destination = path.expanduser()
-    _classify_destination(destination, overwrite=overwrite)
     _require_parent_directory(destination.parent)
+    _classify_destination(destination, overwrite=overwrite)
     fd, temp = _create_temp_file(destination.parent)
     published = False
     try:
@@ -43,6 +43,8 @@ def _classify_destination(path: Path, *, overwrite: bool) -> None:
     except FileNotFoundError:
         return
     except OSError as exc:
+        if exc.errno == errno.ENOTDIR:
+            raise HandoffOutputError("Could not write handoff file: parent path is not a directory.") from exc
         raise HandoffOutputError(_os_error_message(exc)) from exc
     if stat.S_ISREG(status.st_mode):
         if overwrite:
