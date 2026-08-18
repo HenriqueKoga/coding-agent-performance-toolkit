@@ -71,7 +71,7 @@ After the telemetry-summary work, CAPT can:
 - Print deterministic text and JSON summaries, including capture-level tool execution counts and success rate
 - Detect repeated tool calls, repeated failed tool calls, high cumulative tool result volume, high tool failure rate, dominant tool usage, compaction pressure, and subagent usage from those summaries
 - Compare two explicit local captures and report signed integer deltas for a fixed allowlist of summary aggregates
-- Export a compact, agent-readable evidence handoff from one explicit local capture
+- Export a compact, agent-readable evidence handoff from one explicit local capture, to stdout by default or to an explicit local file
 - List eligible local capture files without reading their contents
 
 This version does not score sessions, emit recommendations, or call a model.

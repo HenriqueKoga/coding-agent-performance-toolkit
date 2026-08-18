@@ -35,7 +35,7 @@ In scope today:
 - Incremental, deterministic text and JSON summaries, including capture-level tool execution counts and an integer basis-point success rate
 - Deterministic insight rules for repeated tool calls, repeated failed tool calls, high cumulative tool result volume, high tool failure rate, dominant tool usage, compaction pressure, and subagent usage
 - Deterministic comparison of two explicit local captures, with per-metric availability so missing telemetry is never treated as observed zero
-- Deterministic compact handoff export from one explicit local capture, using a closed capture-source allowlist and a versioned JSON v1 contract independent from summary and comparison schemas
+- Deterministic compact handoff export from one explicit local capture, using a closed capture-source allowlist and a versioned JSON v1 contract independent from summary and comparison schemas, with optional explicit `--output` file persistence
 
 Out of scope today:
 
@@ -93,6 +93,7 @@ src/coding_agent_performance/
     trace/summary.py                    Capture-to-summary use case
     trace/comparison.py                 Pure eight-metric comparison of two summaries
     trace/handoff.py                    Pure compact extract from TraceSummary
+    trace/handoff_output.py             Exclusive local handoff file writer
     trace/rendering.py                  Allowlist JSON dict plus text/JSON summary, comparison, handoff, and capture-list output
 ```
 
@@ -100,7 +101,7 @@ The Claude Code adapter knows official export configuration and how to map Claud
 
 The collector does not know Claude Code. It accepts `POST /v1/logs` and `POST /v1/metrics`, persists the JSON object as received, and counts successful batches. It does not interpret OTLP resource attributes.
 
-Storage writes one compact JSON line per HTTP request. The reader validates those envelopes in streaming mode and never loads the whole file. `capt trace list` scans the default capture directory for eligible `.jsonl` files and prints filename, size in bytes, and UTC modification time without opening capture contents. Optional `--limit` prints a prefix of that newest-first listing. `capt trace summarize` accepts an explicit path or `--latest`, which selects the newest eligible `.jsonl` file in the default capture directory without following symbolic links. Listing and `--latest` share the same eligibility and newest-first ordering rules. `--latest` keeps a single running maximum; listing materializes the ordered set. `capt trace compare` takes exactly two explicit capture paths, summarizes each distinct filesystem object through the same bounded path, and reuses one immutable snapshot when both arguments resolve to the same file. `capt trace handoff` takes exactly one explicit capture path, summarizes it through that same bounded path, and copies a compact allowlist into `TraceHandoff`. Capture `source` is mapped through a closed identity sanitizer (`claude-code` or `unknown`) so an arbitrary envelope string cannot appear in the handoff. Handoff output is stdout-only.
+Storage writes one compact JSON line per HTTP request. The reader validates those envelopes in streaming mode and never loads the whole file. `capt trace list` scans the default capture directory for eligible `.jsonl` files and prints filename, size in bytes, and UTC modification time without opening capture contents. Optional `--limit` prints a prefix of that newest-first listing. `capt trace summarize` accepts an explicit path or `--latest`, which selects the newest eligible `.jsonl` file in the default capture directory without following symbolic links. Listing and `--latest` share the same eligibility and newest-first ordering rules. `--latest` keeps a single running maximum; listing materializes the ordered set. `capt trace compare` takes exactly two explicit capture paths, summarizes each distinct filesystem object through the same bounded path, and reuses one immutable snapshot when both arguments resolve to the same file. `capt trace handoff` takes exactly one explicit capture path, summarizes it through that same bounded path, and copies a compact allowlist into `TraceHandoff`. Capture `source` is mapped through a closed identity sanitizer (`claude-code` or `unknown`) so an arbitrary envelope string cannot appear in the handoff. Handoff output is stdout by default. An explicit `--output` path persists the same representation to a local file.
 
 The OTLP decoder understands `AnyValue`, `resourceLogs`, and `resourceMetrics` only. It does not import the Claude Code adapter.
 

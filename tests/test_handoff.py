@@ -1,4 +1,5 @@
 import json
+import os
 from collections.abc import Callable
 from pathlib import Path
 
@@ -501,8 +502,10 @@ def test_handoff_help(visible: Callable[[str], str]) -> None:
     assert "--format" in text
     assert "json" in text
     assert "text" in text
+    assert "--output" in text
+    assert "--force" in text
     assert "--latest" not in text
-    assert "--output" not in text
+    assert " -o " not in f" {text} "
 
 
 def test_cli_minimal_capture_text_and_empty_insights(tmp_path: Path) -> None:
@@ -571,13 +574,6 @@ def test_cli_errors_are_payload_free(tmp_path: Path) -> None:
     assert latest_result.exit_code != 0
     assert "Traceback" not in latest_result.output
     assert "--latest" not in latest_result.stdout
-
-    output_path = tmp_path / "out.json"
-    output_result = _invoke_handoff(str(extra), "--output", str(output_path))
-    assert output_result.exit_code != 0
-    assert "exactly one capture path" in output_result.output
-    _assert_payload_free(output_result.output, extra)
-    assert str(output_path.resolve()) not in output_result.output
 
     schema_row = envelope(signal="logs", payload=resource_logs([]))
     schema_row["schema_version"] = _SCHEMA_VERSION_MARKER
@@ -837,3 +833,170 @@ def test_fixture_handoff_omits_sensitive_markers() -> None:
         for marker in SENSITIVE_MARKERS:
             assert marker not in output
         _assert_no_narrative(output)
+
+
+def _assert_no_handoff_temps(directory: Path) -> None:
+    leftovers = [path for path in directory.iterdir() if path.name.startswith(".capt-tmp-")]
+    assert leftovers == []
+
+
+def test_cli_stdout_without_output_creates_no_file(tmp_path: Path) -> None:
+    path = write_synthetic_capture(tmp_path / "capture.jsonl")
+    before = {entry.name for entry in tmp_path.iterdir()}
+    text = _invoke_handoff(str(path))
+    json_result = _invoke_handoff(str(path), "--format", "json")
+    after = {entry.name for entry in tmp_path.iterdir()}
+    assert text.exit_code == 0
+    assert json_result.exit_code == 0
+    assert text.stdout.startswith("Handoff")
+    assert json_result.stdout.startswith("{")
+    assert after == before
+
+
+def test_cli_output_file_bytes_match_stdout_text_and_json(tmp_path: Path) -> None:
+    path = write_synthetic_capture(tmp_path / "capture.jsonl")
+    text_stdout = _invoke_handoff(str(path))
+    json_stdout = _invoke_handoff(str(path), "--format", "json")
+    text_path = tmp_path / "handoff.txt"
+    json_path = tmp_path / "handoff.json"
+    text_file = _invoke_handoff(str(path), "--output", str(text_path))
+    json_file = _invoke_handoff(str(path), "--format", "json", "--output", str(json_path))
+    assert text_stdout.exit_code == 0
+    assert json_stdout.exit_code == 0
+    assert text_file.exit_code == 0
+    assert json_file.exit_code == 0
+    assert text_file.stdout == ""
+    assert json_file.stdout == ""
+    assert text_path.read_text(encoding="utf-8") == text_stdout.stdout
+    assert json_path.read_text(encoding="utf-8") == json_stdout.stdout
+    assert text_path.read_text(encoding="utf-8").endswith("\n")
+    assert json_path.read_text(encoding="utf-8").endswith("}\n")
+    _assert_no_handoff_temps(tmp_path)
+
+
+def test_cli_repeated_file_writes_are_byte_identical(tmp_path: Path) -> None:
+    path = write_synthetic_capture(tmp_path / "capture.jsonl")
+    first_path = tmp_path / "first.json"
+    second_path = tmp_path / "second.json"
+    first = _invoke_handoff(str(path), "--format", "json", "--output", str(first_path))
+    second = _invoke_handoff(str(path), "--format", "json", "--output", str(second_path))
+    assert first.exit_code == 0
+    assert second.exit_code == 0
+    assert first_path.read_bytes() == second_path.read_bytes()
+
+
+def test_cli_refuses_existing_file_without_force(tmp_path: Path) -> None:
+    path = write_synthetic_capture(tmp_path / "capture.jsonl")
+    dest = tmp_path / "handoff.txt"
+    dest.write_text("keep\n", encoding="utf-8")
+    result = _invoke_handoff(str(path), "--output", str(dest))
+    assert result.exit_code == 1
+    assert "Handoff file already exists: handoff.txt" in result.output
+    assert dest.read_text(encoding="utf-8") == "keep\n"
+    assert "Traceback" not in result.output
+    assert str(dest.resolve()) not in result.output
+    _assert_no_handoff_temps(tmp_path)
+
+
+def test_cli_force_replaces_regular_file(tmp_path: Path) -> None:
+    path = write_synthetic_capture(tmp_path / "capture.jsonl")
+    stdout = _invoke_handoff(str(path), "--format", "json")
+    dest = tmp_path / "handoff.json"
+    dest.write_text("keep\n", encoding="utf-8")
+    result = _invoke_handoff(str(path), "--format", "json", "--output", str(dest), "--force")
+    assert stdout.exit_code == 0
+    assert result.exit_code == 0
+    assert result.stdout == ""
+    assert dest.read_text(encoding="utf-8") == stdout.stdout
+    _assert_no_handoff_temps(tmp_path)
+
+
+def test_cli_force_without_output_is_rejected(tmp_path: Path) -> None:
+    path = write_synthetic_capture(tmp_path / "capture.jsonl")
+    result = _invoke_handoff(str(path), "--force")
+    assert result.exit_code == 1
+    assert result.output.strip() == "Provide --output with --force."
+    assert "Traceback" not in result.output
+    _assert_payload_free(result.output, path)
+
+
+def test_cli_refuses_symlink_directory_fifo_and_missing_parent(tmp_path: Path) -> None:
+    path = write_synthetic_capture(tmp_path / "capture.jsonl")
+    stdout = _invoke_handoff(str(path))
+    assert stdout.exit_code == 0
+
+    if hasattr(os, "symlink"):
+        target = tmp_path / "target.txt"
+        target.write_text("keep\n", encoding="utf-8")
+        link = tmp_path / "link.txt"
+        link.symlink_to(target)
+        result = _invoke_handoff(str(path), "--output", str(link), "--force")
+        assert result.exit_code == 1
+        assert "path is a symbolic link" in result.output
+        assert link.is_symlink()
+        assert target.read_text(encoding="utf-8") == "keep\n"
+        assert str(link.resolve()) not in result.output
+        assert "Traceback" not in result.output
+
+    directory = tmp_path / "outdir"
+    directory.mkdir()
+    dir_result = _invoke_handoff(str(path), "--output", str(directory), "--force")
+    assert dir_result.exit_code == 1
+    assert "path is a directory" in dir_result.output
+    assert directory.is_dir()
+    assert str(directory.resolve()) not in dir_result.output
+
+    if hasattr(os, "mkfifo"):
+        fifo = tmp_path / "handoff.fifo"
+        os.mkfifo(fifo)
+        fifo_result = _invoke_handoff(str(path), "--output", str(fifo), "--force")
+        assert fifo_result.exit_code == 1
+        assert "path is not a regular file" in fifo_result.output
+        assert str(fifo.resolve()) not in fifo_result.output
+
+    missing_parent = tmp_path / "missing" / "handoff.txt"
+    missing_result = _invoke_handoff(str(path), "--output", str(missing_parent), "--force")
+    assert missing_result.exit_code == 1
+    assert "parent directory does not exist" in missing_result.output
+    assert not (tmp_path / "missing").exists()
+    assert str(missing_parent) not in missing_result.output
+
+    file_parent = tmp_path / "not-a-dir"
+    file_parent.write_text("file\n", encoding="utf-8")
+    nested = file_parent / "handoff.txt"
+    nested_result = _invoke_handoff(str(path), "--output", str(nested), "--force")
+    assert nested_result.exit_code == 1
+    assert "parent path is not a directory" in nested_result.output
+    assert file_parent.read_text(encoding="utf-8") == "file\n"
+    assert str(nested) not in nested_result.output
+    _assert_no_handoff_temps(tmp_path)
+
+
+def test_cli_file_output_omits_sensitive_markers(tmp_path: Path) -> None:
+    path = write_synthetic_capture(tmp_path / "capture.jsonl")
+    dest = tmp_path / "handoff.json"
+    result = _invoke_handoff(str(path), "--format", "json", "--output", str(dest))
+    assert result.exit_code == 0
+    body = dest.read_text(encoding="utf-8")
+    parsed = json.loads(body)
+    _assert_handoff_key_order(parsed)
+    _assert_no_disallowed_keys(parsed)
+    for text in (body, result.stdout, result.output):
+        assert str(path.resolve()) not in text
+        assert str(dest.resolve()) not in text
+        for marker in SENSITIVE_MARKERS:
+            assert marker not in text
+        _assert_no_narrative(text)
+
+
+def test_cli_file_output_onto_capture_requires_force(tmp_path: Path) -> None:
+    path = write_synthetic_capture(tmp_path / "capture.jsonl")
+    original = path.read_bytes()
+    stdout = _invoke_handoff(str(path))
+    refused = _invoke_handoff(str(path), "--output", str(path))
+    assert stdout.exit_code == 0
+    assert refused.exit_code == 1
+    assert path.read_bytes() == original
+    forced = _invoke_handoff(str(path), "--output", str(path), "--force")
+    assert forced.exit_code == 0
+    assert path.read_text(encoding="utf-8") == stdout.stdout
