@@ -168,7 +168,7 @@ Project documents:
 - [docs/product.md](docs/product.md) — product intent and direction
 - [docs/architecture.md](docs/architecture.md) — system structure
 - [docs/development.md](docs/development.md) — setup, workflow, and delivery
-- [docs/spec-kit.md](docs/spec-kit.md) — Spec Kit specification workflow
+- [docs/spec-kit.md](docs/spec-kit.md) — Spec Agent contract and Spec Kit specification workflow
 - [docs/decisions/README.md](docs/decisions/README.md) — architecture decisions
 
 ## Roadmap

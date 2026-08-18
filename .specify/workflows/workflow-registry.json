@@ -4,7 +4,7 @@
     "speckit": {
       "name": "Specify through tasks",
       "version": "1.0.0",
-      "description": "Runs specify \u2192 plan \u2192 tasks with review gates; stops before implementation",
+      "description": "Runs specify \u2192 plan \u2192 tasks \u2192 analyze with review gates; stops at a specification-only review PR",
       "source": "bundled",
       "installed_at": "2026-08-17T23:04:01.676747+00:00",
       "updated_at": "2026-08-17T23:04:01.676755+00:00"

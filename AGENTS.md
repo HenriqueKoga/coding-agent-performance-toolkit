@@ -22,7 +22,7 @@ Before a non-trivial change, read only what the task needs:
 2. [docs/product.md](docs/product.md)
 3. [docs/architecture.md](docs/architecture.md)
 4. [docs/development.md](docs/development.md)
-5. [docs/spec-kit.md](docs/spec-kit.md) when the work is specification or Spec Kit workflow
+5. [docs/spec-kit.md](docs/spec-kit.md) when the work is specification authoring or Spec Kit workflow
 6. Related ADRs in [docs/decisions/](docs/decisions/README.md)
 7. The source files and tests directly involved
 
@@ -103,7 +103,9 @@ Operational constraints for work in this repository:
 9. Update documentation when contracts or architecture change.
 10. Return a structured handoff.
 
-See [docs/development.md](docs/development.md) for setup, commands, and delivery details. See [docs/spec-kit.md](docs/spec-kit.md) for the specification-layer workflow. Spec Kit does not replace this file's validation, Git/PR, or human-approval rules.
+See [docs/development.md](docs/development.md) for setup, commands, and delivery details. See [docs/spec-kit.md](docs/spec-kit.md) for the Spec Agent contract and specification-layer workflow. Spec Kit does not replace this file's validation, Git/PR, or human-approval rules.
+
+When the task is specification authoring, follow that Spec Agent contract: use the repository-pinned Spec Kit integration, write artifacts under `specs/<feature>/`, open a specification-only review PR, and stop. Do not run `/speckit.implement` or `/speckit.taskstoissues`, mutate lifecycle or risk labels, dispatch another agent, merge, or change CAPT runtime code.
 
 ## Required validation
 
@@ -154,7 +156,7 @@ Small internal changes do not need an ADR.
 ## Git and PR rules
 
 - Use small, focused branches.
-- Prefix branches with `feat/`, `fix/`, `refactor/`, `docs/`, `test/`, or `chore/`.
+- Prefix branches with `feat/`, `fix/`, `refactor/`, `docs/`, `test/`, `chore/`, or `spec/`.
 - Write conventional, intentional commits.
 - Do not mix unrelated refactors.
 - Do not revert existing work without authorization.

@@ -801,3 +801,11 @@ def test_pull_request_template_keeps_closes_contract_and_documents_opt_out() -> 
     assert has_lifecycle_opt_out(template) is False
     with pytest.raises(LifecycleError, match="does not contain a supported Closes"):
         parse_linked_issue_number(template)
+
+
+def test_spec_review_pull_request_template_opts_out_of_lifecycle() -> None:
+    template = Path(".github/spec-review-pull-request.md").read_text(encoding="utf-8")
+    assert template.splitlines()[2] == LIFECYCLE_OPT_OUT_MARKER
+    assert has_lifecycle_opt_out(template) is True
+    with pytest.raises(LifecycleError, match="opts out of Agent Task lifecycle"):
+        parse_linked_issue_number(template)

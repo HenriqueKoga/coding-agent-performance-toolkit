@@ -109,8 +109,12 @@ Spec Kit improves specification quality. It does not replace the GitHub/Cursor/C
 ```text
 Roadmap / product idea
         ↓
-Spec Kit
-  constitution → specify → clarify? → plan → tasks → analyze
+Spec Agent (pinned Spec Kit)
+  constitution? → specify → clarify? → plan → tasks → analyze.md
+        ↓
+specification-only review PR
+        ↓
+human review / merge
         ↓
 manual GitHub Agent Task Issue
         ↓
@@ -119,7 +123,7 @@ human: agent:ready
 existing Cursor / CI / Codex lifecycle
 ```
 
-`/speckit.implement` is not the production implementation path in this pilot. `/speckit.taskstoissues` is not an automatic bridge into the CAPT issue lifecycle. See [docs/spec-kit.md](../../docs/spec-kit.md).
+`/speckit.implement` is not the production implementation path in this pilot. `/speckit.taskstoissues` is not an automatic bridge into the CAPT issue lifecycle. The Spec Agent stops after the specification review PR. See [docs/spec-kit.md](../../docs/spec-kit.md).
 
 ## Governance
 
@@ -129,4 +133,4 @@ existing Cursor / CI / Codex lifecycle
 - Amendments require a pull request and human approval.
 - Do not weaken privacy, local-first, deterministic-first, provider-boundary, compatibility, or human-approval rules to make a specification or tool fit.
 
-**Version**: 1.0.0 | **Ratified**: 2026-08-17 | **Last Amended**: 2026-08-17
+**Version**: 1.0.1 | **Ratified**: 2026-08-17 | **Last Amended**: 2026-08-18
