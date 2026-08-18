@@ -1,8 +1,9 @@
 """Deterministic Agent Task lifecycle planning for GitHub pull requests.
 
 This module is repository automation, not part of the CAPT runtime package.
-It parses the pull-request template `Closes #<issue>` contract and plans
-label mutations. It never applies `agent:ready`.
+It honors an explicit PR-body opt-out, otherwise parses the pull-request
+template `Closes #<issue>` contract and plans label mutations. It never
+applies `agent:ready`.
 """
 
 import argparse
@@ -44,7 +45,15 @@ GITHUB_REST_READ_MAX_ATTEMPTS = 3
 GITHUB_REST_READ_RETRY_DELAY_SECONDS = 2.0
 RETRYABLE_GITHUB_HTTP_STATUSES = frozenset({500, 502, 503, 504})
 
+LIFECYCLE_OPT_OUT_MARKER = "<!-- capt-lifecycle: ignore -->"
+LIFECYCLE_OPT_OUT_VALUE = "ignore"
+
 _CLOSES_LINE = re.compile(r"^[ \t]*Closes #(\d+)[ \t]*$", re.MULTILINE)
+_LIFECYCLE_NAMESPACE_LINE = re.compile(
+    r"^[ \t]*<!--[ \t]*(capt-lifecycle(?:[ \t:].*?)?)[ \t]*-->[ \t]*$",
+    re.MULTILINE,
+)
+_LIFECYCLE_DIRECTIVE = re.compile(r"^capt-lifecycle:[ \t]*(.*?)[ \t]*$")
 _GITHUB_HTTP_STATUS = re.compile(r"\bHTTP (\d{3})\b")
 
 
@@ -88,9 +97,31 @@ class GitHubApiResponse:
     stderr: str
 
 
+def has_lifecycle_opt_out(body: str) -> bool:
+    """Return True when the pull-request body opts out of Agent Task lifecycle."""
+    normalized = _normalize_pr_body(body)
+    payloads = tuple(match.strip() for match in _LIFECYCLE_NAMESPACE_LINE.findall(normalized))
+    if not payloads:
+        return False
+    if any(_lifecycle_directive_value(payload) != LIFECYCLE_OPT_OUT_VALUE for payload in payloads):
+        raise LifecycleError("pull request body contains an invalid or ambiguous capt-lifecycle marker")
+    if _CLOSES_LINE.search(normalized) is not None:
+        raise LifecycleError("pull request body combines capt-lifecycle opt-out with a Closes #<issue> link")
+    return True
+
+
+def _lifecycle_directive_value(payload: str) -> str | None:
+    match = _LIFECYCLE_DIRECTIVE.fullmatch(payload)
+    if match is None:
+        return None
+    return match.group(1)
+
+
 def parse_linked_issue_number(body: str) -> int:
     """Return the single `Closes #<issue>` target from a pull-request body."""
-    matches = _CLOSES_LINE.findall(body.replace("\r\n", "\n").replace("\r", "\n"))
+    if has_lifecycle_opt_out(body):
+        raise LifecycleError("pull request body opts out of Agent Task lifecycle")
+    matches = _CLOSES_LINE.findall(_normalize_pr_body(body))
     issue_numbers = [int(match) for match in matches if int(match) > 0]
     unique_issues = tuple(dict.fromkeys(issue_numbers))
     if not unique_issues:
@@ -294,6 +325,10 @@ def _risk_label_to_add(issue_number: int, risk: RiskLabel, pr_labels: Sequence[s
     raise LifecycleError(f"pull request has multiple risk:* labels: {rendered}")
 
 
+def _normalize_pr_body(body: str) -> str:
+    return body.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def _load_json_object(path: Path, what: str) -> dict[str, object]:
     try:
         parsed: object = json.loads(path.read_text(encoding="utf-8"))
@@ -390,6 +425,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parse_link = subparsers.add_parser("parse-link", help="Print the single Closes #<issue> target.")
     parse_link.add_argument("--event-file", type=Path, required=True)
 
+    opt_out = subparsers.add_parser(
+        "opt-out",
+        help="Print whether the pull request opts out of Agent Task lifecycle.",
+    )
+    opt_out.add_argument("--event-file", type=Path, required=True)
+
     read_labels = subparsers.add_parser("read-issue-labels", help="Read Issue labels from GitHub REST.")
     read_labels.add_argument("--issue", dest="issue_number", type=int, required=True)
     read_labels.add_argument("--repo", default=None)
@@ -406,6 +447,16 @@ def _run_parse_link(event_file: Path, stdout: TextIO) -> int:
     event = load_pull_request_event(event_file)
     issue_number = parse_linked_issue_number(event.body)
     print(issue_number, file=stdout)
+    return 0
+
+
+def _run_opt_out(event_file: Path, stdout: TextIO) -> int:
+    event = load_pull_request_event(event_file)
+    opted_out = has_lifecycle_opt_out(event.body)
+    payload: dict[str, object] = {"opt_out": opted_out}
+    if opted_out:
+        payload["message"] = "pull request opted out of Agent Task lifecycle; no label changes"
+    print(json.dumps(payload, allow_nan=False), file=stdout)
     return 0
 
 
@@ -443,6 +494,8 @@ def main(argv: Sequence[str] | None = None, stdout: TextIO | None = None) -> int
         match args.command:
             case "parse-link":
                 return _run_parse_link(args.event_file, output)
+            case "opt-out":
+                return _run_opt_out(args.event_file, output)
             case "read-issue-labels":
                 return _run_read_issue_labels(args.issue_number, args.repo, output)
             case "plan":
