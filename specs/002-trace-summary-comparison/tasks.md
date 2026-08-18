@@ -16,7 +16,7 @@
 - [x] New comparison JSON v1 contract is exact and allowlisted
 - [x] Missing telemetry is never converted into observed zero
 - [x] Availability state remains provider-neutral and fixed-size
-- [x] Narrow normalization-field presence preservation is explicitly approved
+- [x] Narrow normalization-field presence/validity preservation is explicitly approved for API usage and tool-success status
 - [x] `model_requests` without an API-request event is unavailable in v1, not observed zero
 - [x] Same-file inputs reuse one immutable summary snapshot
 - [x] Streaming / bounded memory is preserved
@@ -36,14 +36,14 @@
 - [ ] T003 Add normalizer tests proving missing/invalid API-request cost, input-token, and output-token fields remain distinguishable from explicit numeric zero without changing existing telemetry mappings
 - [ ] T004 Add request-count availability tests proving at least one API-request event makes `model_requests` available while zero API-request events leaves it unavailable, including OTEL-metric fallback and no-usage captures
 - [ ] T005 Add independent availability tests for estimated cost, input tokens, and output tokens, including partial API-event attributes and partial OTEL metric series
-- [ ] T006 Add tool calls/failures availability tests for log-backed versus metrics-only captures
+- [ ] T006 Add independent tool-calls and tool-failures availability tests for log-backed versus metrics-only captures; prove that missing or invalid `success` on any counted tool event leaves calls available but failures unavailable
 - [ ] T007 Add tool-result-byte tests where one or more counted tool calls lack result-size evidence
 - [ ] T008 Add compaction availability tests for lifecycle/log-backed versus metrics-only captures
 - [ ] T009 For metrics with an affirmative zero-coverage signal, assert observed numeric zero remains available while missing telemetry remains unavailable; explicitly assert that `model_requests` has no observed-zero state in v1
 
 ### Implementation
 
-- [ ] T010 Preserve per-field presence for already-supported API-request cost/input/output fields in the normalized provider-neutral record; do not add new telemetry mappings or provider-specific comparison logic
+- [ ] T010 Preserve per-field presence/validity for already-supported API-request cost/input/output fields and tool-success status in normalized provider-neutral records; retain the existing coerced success value for current summary behavior, and do not add new telemetry mappings or provider-specific comparison logic
 - [ ] T011 Add the smallest immutable provider-neutral availability DTO/fields needed for the eight slots
 - [ ] T012 Extend existing accumulators with fixed-size availability/completeness state; do not retain raw records or introduce a registry
 - [ ] T013 Attach availability to the internal immutable summary domain result while keeping existing `trace summarize` renderers/schema version unchanged
@@ -95,7 +95,7 @@
 ## Phase 6: Documentation and validation
 
 - [ ] T031 [P] Document `capt trace compare`, the exact JSON v1 contract, eight fixed slots, unavailable semantics including zero-request behavior, and same-file snapshot behavior in product/architecture/public-format docs without duplicating the full feature spec
-- [ ] T032 [P] Confirm the only provider-adapter change is narrow preservation of presence for already-supported API-request fields; no new provider mapping or provider-specific comparison behavior is introduced
+- [ ] T032 [P] Confirm provider-adapter changes are limited to narrow preservation of presence/validity for already-supported API-request fields and tool-success status; existing success coercion/summary behavior remains compatible, and no new provider mapping or provider-specific comparison behavior is introduced
 - [ ] T033 [P] Confirm no existing summary JSON schema/version, insight semantics, or capture contracts changed
 - [ ] T034 [P] Confirm all fixtures/examples are synthetic and comparison output/error messages remain allowlisted
 - [ ] T035 Run `uv sync --frozen --all-groups`, `uv run ruff format --check .`, `uv run ruff check .`, `uv run ty check`, `uv run pytest`, `uv build --clear`, and `git diff --check`
@@ -106,6 +106,7 @@
 - Do not infer availability from numeric values.
 - Do not infer observed zero from absence of events; `model_requests` with no API-request event is unavailable in v1.
 - Do not erase normalized field presence into fallback zero when availability depends on it.
+- Do not expose a tool-failure delta unless every counted tool event has valid success-status evidence; tool-event coverage alone proves calls, not failure completeness.
 - Do not compare same-file inputs by summarizing the same mutable file twice.
 - Do not deviate from the mandatory comparison JSON v1 layout without a new specification/schema version decision.
 - Do not add percentages, scoring, recommendations, a metric registry, generic experiment abstraction, protocol hierarchy, or provider-specific comparison path.

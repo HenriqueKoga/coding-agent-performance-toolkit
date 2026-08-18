@@ -35,7 +35,7 @@ If baseline and candidate resolve to the same filesystem object, summarize it ex
 
 The current final numeric aggregates cannot always distinguish observed zero from missing telemetry. Add the smallest fixed-size provider-neutral availability state required by the eight slots during existing normalization/aggregation.
 
-For API request usage fields, the current normalizer loses presence by coercing absent/invalid cost/input/output attributes to integer zero. This feature explicitly permits the narrow additive change needed to preserve whether each already-supported field was present and valid before aggregation. Do not add new provider telemetry mappings or provider-specific comparison behavior.
+For API request usage fields, the current normalizer loses presence by coercing absent/invalid cost/input/output attributes to integer zero. Tool execution normalization similarly loses status completeness by coercing a missing or invalid `success` attribute to `success=True`. This feature explicitly permits the narrow additive changes needed to preserve whether each already-supported usage field and tool-success status was present and valid before aggregation. Preserve the existing normalized success value and existing summary behavior; the added status evidence controls only whether the comparison's failure slot is available. Do not add new provider telemetry mappings or provider-specific comparison behavior.
 
 Preferred summary-side shape:
 
@@ -58,7 +58,8 @@ Availability rules:
 
 - `model_requests`: only when request-count evidence is observed; metrics-only/no-usage fallback must not imply zero.
 - cost/input/output tokens: independently available only when their own evidence is observed sufficiently for a complete aggregate; API-event normalization must preserve per-field presence rather than erase it into zero.
-- tool calls/failures: only with observed tool-event telemetry coverage.
+- tool calls: only with observed tool-event telemetry coverage.
+- tool failures: only with observed tool-event telemetry coverage and valid success status for every counted tool event; a missing or invalid `success` attribute makes the failure aggregate unavailable even though existing normalization continues to treat that event as successful for existing summaries.
 - tool result bytes: only when tool coverage exists and result-size evidence is complete for counted calls.
 - compactions: only with relevant normalized lifecycle/log telemetry coverage.
 
@@ -157,7 +158,7 @@ No provider provenance, paths, identifiers, percentages, scores, recommendations
 ## Expected implementation touch points
 
 ```text
-src/coding_agent_performance/providers/claude_code/normalizer.py  # narrow presence preservation only
+src/coding_agent_performance/adapters/claude_code/normalizer.py  # narrow presence/validity preservation only
 normalized event/domain model used by model-request aggregation
 src/coding_agent_performance/trace/report.py
 src/coding_agent_performance/trace/summary.py
@@ -186,8 +187,8 @@ uv build --clear
 git diff --check
 ```
 
-Focused validation must cover API-field presence preservation, observed-zero versus unavailable telemetry, partial coverage, mixed availability, same-file snapshot reuse, aliases/symlinks where portable, the exact JSON v1 contract, text/JSON agreement, privacy, and unchanged existing trace-summary rendering.
+Focused validation must cover API-field presence preservation, tool-success validity preservation (including missing and invalid `success` attributes), observed-zero versus unavailable telemetry, partial coverage, mixed availability, same-file snapshot reuse, aliases/symlinks where portable, the exact JSON v1 contract, text/JSON agreement, privacy, and unchanged existing trace-summary rendering.
 
 ## Complexity Tracking
 
-The intentional scope increase from the initial draft is limited to fixed-size internal availability metadata, narrow preservation of presence for already-supported normalized API usage fields, and same-file snapshot reuse. These are required to prevent false deterministic evidence; none changes the existing trace-summary public schema.
+The intentional scope increase from the initial draft is limited to fixed-size internal availability metadata, narrow preservation of presence/validity for already-supported normalized API usage fields and tool-success status, and same-file snapshot reuse. These are required to prevent false deterministic evidence; none changes the existing trace-summary public schema or existing tool-success aggregation behavior.

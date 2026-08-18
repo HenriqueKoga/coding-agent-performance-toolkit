@@ -73,7 +73,8 @@ A developer or local script wants the comparison as structured JSON with the sam
   - model request availability MUST require at least one normalized API-request event; because v1 has no independent zero-request coverage signal, absence of API-request events MUST mean unavailable rather than observed zero;
   - estimated cost, input tokens, and output tokens MUST be independently available only when their own source data is observed;
   - the normalization boundary MUST preserve per-field presence for API request cost/input/output attributes instead of coercing missing/invalid values into indistinguishable observed zeros;
-  - tool calls/failures MUST distinguish observed tool-event coverage from captures without tool telemetry;
+  - tool calls MUST distinguish observed tool-event coverage from captures without tool telemetry;
+  - tool failures MUST additionally require valid `success` evidence for every counted tool event; because current normalization coerces a missing or invalid `success` attribute to a successful outcome, the normalization boundary MUST preserve success-field validity separately for comparison availability without changing existing summary behavior;
   - tool result bytes MUST be unavailable if the required result-size evidence is incomplete for counted tool calls;
   - session compactions MUST distinguish observed lifecycle/log coverage from captures where compaction telemetry was not captured.
 - **FR-008**: V1 MUST NOT report percentage deltas.
@@ -83,7 +84,7 @@ A developer or local script wants the comparison as structured JSON with the sam
 - **FR-012**: Comparison MUST remain local-only and read-only; it MUST NOT persist comparison state or send data externally.
 - **FR-013**: Invalid input MUST exit non-zero with concise error text, no traceback, no payload contents, and no absolute path disclosure.
 - **FR-014**: Existing `trace summarize`, `trace list`, collection, summary JSON schema/version, and insight behavior MUST remain unchanged.
-- **FR-015**: The implementation MAY add provider-neutral internal availability metadata to normalized event/domain records and the immutable summary domain model, but existing `trace summarize` text/JSON rendering MUST NOT expose that metadata or change its public schema in this feature.
+- **FR-015**: The implementation MAY add provider-neutral internal availability metadata to normalized event/domain records and the immutable summary domain model, including presence/validity for already-supported API usage fields and tool-success status, but existing `trace summarize` text/JSON rendering MUST NOT expose that metadata or change its public schema in this feature.
 - **FR-016**: The comparison JSON contract MUST use `schema_version: 1`, a top-level `metrics` object, and exactly the eight snake_case metric keys from FR-003 as defined in `plan.md`; no additional top-level or per-metric fields are permitted in v1.
 
 ### Key Entities
@@ -164,9 +165,9 @@ Plus focused tests covering observed zero versus unavailable telemetry where an 
 ### Human decisions
 
 - Human approval is required before the operational Issue receives `agent:ready`.
-- This specification explicitly approves the **narrow additive normalization change** required to preserve presence/absence of existing API-request cost/input/output fields, plus provider-neutral internal availability metadata required to distinguish observed zero from missing telemetry. It does not approve provider-specific comparison logic, new telemetry mappings, or broader adapter redesign.
+- This specification explicitly approves the **narrow additive normalization changes** required to preserve presence/validity of existing API-request cost/input/output fields and tool-success status, plus provider-neutral internal availability metadata required to distinguish observed zero or complete failure evidence from missing telemetry. Existing tool-success coercion and summary behavior remain unchanged. It does not approve provider-specific comparison logic, new telemetry mappings, or broader adapter redesign.
 - Existing trace-summary public rendering/schema must remain unchanged.
-- Stop for human review if implementation requires changing the capture schema, adding new provider telemetry mappings beyond preserving existing field presence, changing existing trace-summary public output/schema version, persistence, a new runtime dependency, or a generic experiment framework.
+- Stop for human review if implementation requires changing the capture schema, adding new provider telemetry mappings beyond preserving existing field presence/validity, changing existing trace-summary public output/schema version, persistence, a new runtime dependency, or a generic experiment framework.
 - Spec Kit must not apply lifecycle or risk labels.
 
 ## Success Criteria *(mandatory)*
