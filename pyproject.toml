@@ -56,7 +56,7 @@ select = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["agent_dispatch", "agent_lifecycle", "agent_rework", "agent_spec", "coding_agent_performance", "cursor_agents"]
+known-first-party = ["agent_dispatch", "agent_lifecycle", "agent_rework", "agent_spec", "agent_spec_dispatch", "coding_agent_performance", "cursor_agents"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

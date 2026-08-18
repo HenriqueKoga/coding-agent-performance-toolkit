@@ -31,10 +31,11 @@ GitHub
      └─ review state
 
 Cursor Cloud Agent
+  ├─ Spec Agent after manual workflow_dispatch (`needs:design`)
   └─ implementation after human agent:ready
 
 GitHub Actions
-  └─ deterministic validation / lifecycle / dispatch / approved-spec index
+  └─ deterministic validation / lifecycle / Spec Agent dispatch / implementation dispatch / approved-spec index
 
 Codex
   └─ independent review
@@ -60,11 +61,17 @@ The Spec Agent is the specification author. It takes a bounded feature brief, us
 
 The contract is agent-independent. Cursor's `/speckit-*` skills are the installed integration here; another Spec Kit-supported agent may invoke the same commands through its own integration. Do not invent a parallel specification format, skip the project-local template overrides, or treat Cursor-specific reasoning as specification semantics.
 
+### Starting the Spec Agent
+
+A human starts the Spec Agent for an existing Agent Task Issue in `needs:design` by running the dedicated `workflow_dispatch` workflow **Agent spec dispatch** with that Issue number from the default branch. The secret-using job uses GitHub Environment `spec-agent-dispatch`. That workflow validates the Issue and creates one Cursor Cloud Agent in Spec Agent mode against `main`. It requires exactly one lifecycle label (`needs:design`) and exactly one `risk:*` label. It does not change lifecycle or risk labels, does not rewrite the Issue body, does not apply `agent:ready`, and does not run on Issue creation, `needs:design` labeling, or a branch-selected workflow ref.
+
+Manual Cursor Cloud Agent launch remains possible. Implementation dispatch on `agent:ready` is unchanged. See [development.md](development.md).
+
 ### Input
 
-A bounded feature brief plus this repository's context: constitution, `AGENTS.md`, product, architecture, related ADRs, and the files the brief names.
+The operational input is an existing Agent Task Issue. The Issue body is the immutable original feature brief plus this repository's context: constitution, `AGENTS.md`, product, architecture, related ADRs, and the files the brief names.
 
-The brief should state goal, acceptance criteria, out of scope, and constraints. It is not a GitHub Issue. It must not include secrets, credentials, real captures, prompts, tool payloads, or private telemetry.
+The brief should state goal, acceptance criteria, out of scope, and constraints. The Spec Agent must not create, edit, or close that GitHub Issue. The brief must not include secrets, credentials, real captures, prompts, tool payloads, or private telemetry.
 
 ### Pinned Spec Kit only
 
@@ -77,7 +84,9 @@ Invoke the same commands Spec Kit documents (`/speckit.specify`, `/speckit.plan`
 Use this path for new roadmap work. The registered `speckit` workflow is truncated so it runs through `/speckit.analyze` and never calls `/speckit.implement`.
 
 ```text
-bounded feature brief + repository context
+Agent Task Issue in needs:design + repository context
+        ↓
+manual workflow_dispatch Spec Agent from main
         ↓
 focused spec/ or docs/ branch (not main)
         ↓
@@ -269,7 +278,7 @@ It does **not** preserve the CAPT issue contract:
 - It can create many issues from one feature, instead of one reviewable Agent Task.
 - It has no human `agent:ready` gate and must not be treated as implementation dispatch.
 
-Because those gaps cannot be closed without changing the lifecycle, **do not run `/speckit.taskstoissues` in this repository**. Keep Issue creation as an explicit manual bridge after specification review.
+Because those gaps cannot be closed without changing the lifecycle, **do not run `/speckit.taskstoissues` in this repository**. The Agent Task Issue already exists before Spec Agent authoring; do not create a second Issue.
 
 ## What this pilot does not change
 

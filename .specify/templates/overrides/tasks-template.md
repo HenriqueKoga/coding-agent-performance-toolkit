@@ -10,7 +10,7 @@ description: "Task list template for feature implementation"
 
 **Tests**: CAPT features that change behavior include tests. Use synthetic fixtures only.
 
-**Organization**: Tasks are grouped by user story. After `/speckit.analyze`, persist `analyze.md` and open a specification-only review PR. After that PR is reviewed, a human creates one GitHub Agent Task Issue by hand. Do not run `/speckit.implement` as the production path. Do not run `/speckit.taskstoissues` to create lifecycle issues.
+**Organization**: Tasks are grouped by user story. After `/speckit.analyze`, persist `analyze.md` and open a specification-only review PR for the existing Agent Task Issue. Do not create a second GitHub Issue. Do not run `/speckit.implement` as the production path. Do not run `/speckit.taskstoissues` to create lifecycle issues.
 
 ## Format: `[ID] [P?] [Story] Description`
 
