@@ -16,6 +16,8 @@ from agent_lifecycle import (
 from agent_spec import (
     AGENT_READY,
     CANONICAL_ARTIFACTS,
+    GITHUB_ACTIONS_BOT_LOGIN,
+    GITHUB_ACTIONS_BOT_TYPE,
     NEEDS_DESIGN,
     NEEDS_HUMAN_REVIEW,
     SpecApprovalError,
@@ -99,6 +101,16 @@ def _write_artifacts(root: Path, spec_path: str = SPEC_PATH) -> None:
 
 def _approved_comment(issue_number: int = 58, pull_request_number: int = 56, spec: str = SPEC_PATH) -> str:
     return build_approved_comment(SpecMetadata(issue_number=issue_number, spec_path=spec), pull_request_number)
+
+
+def _comment_payload(
+    comment_id: int,
+    body: str,
+    *,
+    login: str = GITHUB_ACTIONS_BOT_LOGIN,
+    user_type: str = GITHUB_ACTIONS_BOT_TYPE,
+) -> dict[str, object]:
+    return {"id": comment_id, "user": {"login": login, "type": user_type}, "body": body}
 
 
 class _ScriptedGitHubApi:
@@ -334,7 +346,10 @@ def test_rerun_updates_the_same_comment_without_duplication(tmp_path: Path) -> N
     assert metadata is not None
     stale = "<!-- capt-spec-approved:v1\nissue: 58\npr: 56\nspec: " + SPEC_PATH + "\n-->\n\nstale\n"
     comments = comments_from_mapping(
-        [{"id": 77, "body": stale}, {"id": 78, "body": "human note about the spec"}],
+        [
+            _comment_payload(77, stale),
+            _comment_payload(78, "human note about the spec", login="reviewer", user_type="User"),
+        ],
         "comments",
     )
     plan = plan_spec_handoff(event, metadata, (NEEDS_HUMAN_REVIEW,), comments, repo_root=tmp_path)
@@ -346,12 +361,47 @@ def test_rerun_updates_the_same_comment_without_duplication(tmp_path: Path) -> N
         event,
         metadata,
         (NEEDS_HUMAN_REVIEW,),
-        comments_from_mapping([{"id": 77, "body": plan.comment_body}], "comments"),
+        comments_from_mapping([_comment_payload(77, plan.comment_body)], "comments"),
         repo_root=tmp_path,
     )
     assert unchanged.outcome == "unchanged"
     assert unchanged.comment_action == "unchanged"
     assert unchanged.existing_comment_id == 77
+
+
+def test_handoff_creates_instead_of_updating_a_forged_marker(tmp_path: Path) -> None:
+    _write_artifacts(tmp_path)
+    event = load_merged_pull_request_event(_event_file(tmp_path, _spec_body()))
+    metadata = classify_spec_event(event)
+    assert metadata is not None
+    forged = _approved_comment(pull_request_number=99, spec="specs/001-compaction-pressure/spec.md")
+    comments = comments_from_mapping(
+        [_comment_payload(77, forged, login="attacker", user_type="User")],
+        "comments",
+    )
+    plan = plan_spec_handoff(event, metadata, (NEEDS_HUMAN_REVIEW,), comments, repo_root=tmp_path)
+    assert plan.outcome == "created"
+    assert plan.comment_action == "create"
+    assert plan.existing_comment_id is None
+
+
+def test_handoff_updates_trusted_comment_not_forged_marker(tmp_path: Path) -> None:
+    _write_artifacts(tmp_path)
+    event = load_merged_pull_request_event(_event_file(tmp_path, _spec_body()))
+    metadata = classify_spec_event(event)
+    assert metadata is not None
+    stale = "<!-- capt-spec-approved:v1\nissue: 58\npr: 56\nspec: " + SPEC_PATH + "\n-->\n\nstale\n"
+    comments = comments_from_mapping(
+        [
+            _comment_payload(77, stale, login="attacker", user_type="User"),
+            _comment_payload(88, stale),
+        ],
+        "comments",
+    )
+    plan = plan_spec_handoff(event, metadata, (NEEDS_HUMAN_REVIEW,), comments, repo_root=tmp_path)
+    assert plan.outcome == "updated"
+    assert plan.comment_action == "update"
+    assert plan.existing_comment_id == 88
 
 
 def test_duplicate_managed_comments_fail_closed(tmp_path: Path) -> None:
@@ -360,7 +410,7 @@ def test_duplicate_managed_comments_fail_closed(tmp_path: Path) -> None:
     metadata = classify_spec_event(event)
     assert metadata is not None
     body = _approved_comment()
-    comments = comments_from_mapping([{"id": 1, "body": body}, {"id": 2, "body": body}], "comments")
+    comments = comments_from_mapping([_comment_payload(1, body), _comment_payload(2, body)], "comments")
     with pytest.raises(SpecApprovalError, match="multiple capt-spec-approved comments"):
         plan_spec_handoff(event, metadata, (NEEDS_HUMAN_REVIEW,), comments, repo_root=tmp_path)
 
@@ -434,18 +484,71 @@ def test_apply_issue_labels_never_includes_body_or_agent_ready() -> None:
 
 def test_resolve_approved_spec_compatibility_path_does_not_guess_directory() -> None:
     comments = comments_from_mapping(
-        [{"id": 1, "body": "please use specs/002-trace-summary-comparison/spec.md"}],
+        [_comment_payload(1, "please use specs/002-trace-summary-comparison/spec.md")],
         "comments",
     )
     assert resolve_approved_spec(58, comments) is None
 
 
 def test_resolve_approved_spec_reads_managed_comment() -> None:
-    comments = comments_from_mapping([{"id": 77, "body": _approved_comment()}], "comments")
+    comments = comments_from_mapping([_comment_payload(77, _approved_comment())], "comments")
     approved = resolve_approved_spec(58, comments)
     assert approved is not None
     assert approved.spec_path == SPEC_PATH
     assert approved.pull_request_number == 56
+
+
+def test_forged_approved_spec_marker_is_ignored() -> None:
+    forged_body = "<!-- capt-spec-approved:v1\nissue: 58\npr: 99\nspec: specs/001-compaction-pressure/spec.md\n-->\n"
+    comments = comments_from_mapping(
+        [_comment_payload(1, forged_body, login="attacker", user_type="User")],
+        "comments",
+    )
+    assert resolve_approved_spec(58, comments) is None
+
+
+def test_forged_approved_spec_marker_does_not_create_duplicates_or_redirect() -> None:
+    genuine = _approved_comment()
+    forged = "<!-- capt-spec-approved:v1\nissue: 58\npr: 99\nspec: specs/001-compaction-pressure/spec.md\n-->\n"
+    comments = comments_from_mapping(
+        [
+            _comment_payload(1, forged, login="attacker", user_type="User"),
+            _comment_payload(77, genuine),
+        ],
+        "comments",
+    )
+    approved = resolve_approved_spec(58, comments)
+    assert approved is not None
+    assert approved.pull_request_number == 56
+    assert approved.spec_path == SPEC_PATH
+
+
+def test_forged_malformed_marker_does_not_fail_closed() -> None:
+    comments = comments_from_mapping(
+        [
+            _comment_payload(
+                1,
+                "<!-- capt-spec-approved:v2\nissue: 58\npr: 56\nspec: specs/001-compaction-pressure/spec.md\n-->\n",
+                login="attacker",
+                user_type="User",
+            )
+        ],
+        "comments",
+    )
+    assert resolve_approved_spec(58, comments) is None
+
+
+def test_github_actions_login_with_non_bot_type_is_ignored() -> None:
+    comments = comments_from_mapping(
+        [_comment_payload(77, _approved_comment(), user_type="User")],
+        "comments",
+    )
+    assert resolve_approved_spec(58, comments) is None
+
+
+def test_comments_without_author_fail_closed() -> None:
+    with pytest.raises(SpecApprovalError, match="are invalid"):
+        comments_from_mapping([{"id": 77, "body": _approved_comment()}], "comments")
 
 
 def test_cli_plan_and_classify_for_valid_merge(tmp_path: Path) -> None:
@@ -656,13 +759,15 @@ def test_comment_read_retries_503_then_succeeds() -> None:
             GitHubApiResponse(returncode=1, stdout=SECRET, stderr="gh: HTTP 503: Server Error"),
             GitHubApiResponse(
                 returncode=0,
-                stdout=json.dumps([{"id": 77, "body": _approved_comment()}]),
+                stdout=json.dumps([_comment_payload(77, _approved_comment())]),
                 stderr="",
             ),
         ]
     )
     comments = read_issue_comments("owner/repo", 58, run_api=api, sleep=api.sleep, notify=api.notify)
     assert comments[0].comment_id == 77
+    assert comments[0].user_login == GITHUB_ACTIONS_BOT_LOGIN
+    assert comments[0].user_type == GITHUB_ACTIONS_BOT_TYPE
     assert api.sleeps == [2.0]
     assert SECRET not in "".join(api.notes)
 

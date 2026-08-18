@@ -112,7 +112,7 @@ Source-of-truth split for Agent Tasks:
 - Issue body = original request / feature brief. Do not rewrite it after specification approval.
 - Spec Kit artifacts under `specs/<feature>/` = approved requirements, design, and tasks. When they conflict with the original brief, the merged `spec.md` is authoritative.
 - labels = operational lifecycle state
-- managed Issue comment `<!-- capt-spec-approved:v1 -->` = Issue ↔ approved-spec index
+- managed Issue comment `<!-- capt-spec-approved:v1 -->` authored by `github-actions[bot]` = Issue ↔ approved-spec index
 - implementation PR = execution, linked with standalone `Closes #<issue>`
 
 If an Issue has no approved-spec comment, do not infer a `specs/` directory from free-form prose. Treat the Issue body as the task specification.
