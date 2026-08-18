@@ -11,6 +11,7 @@ from agent_dispatch import OWNER_REPO, REPOSITORY_URL, STARTING_REF
 from agent_lifecycle import GitHubApiResponse, plan_lifecycle
 from agent_spec_dispatch import (
     CURSOR_AGENTS_URL,
+    DISPATCH_REF_ENV,
     HttpResponse,
     SpecDispatchError,
     build_agent_id,
@@ -21,6 +22,7 @@ from agent_spec_dispatch import (
     parse_issue_number,
     plan_spec_dispatch,
     require_supported_repository,
+    require_trusted_dispatch_ref,
     spec_issue_from_mapping,
     submit_create_agent,
     validate_spec_dispatch_preconditions,
@@ -210,6 +212,16 @@ def test_parse_issue_number_accepts_positive_integer() -> None:
 def test_unsupported_repository_is_rejected() -> None:
     with pytest.raises(SpecDispatchError, match="operates only on HenriqueKoga/coding-agent-performance-toolkit"):
         require_supported_repository("other/repo")
+
+
+def test_trusted_dispatch_ref_rejects_non_main() -> None:
+    with pytest.raises(SpecDispatchError, match="must run from main"):
+        require_trusted_dispatch_ref("refs/heads/cursor/issue-66-5f18")
+
+
+def test_trusted_dispatch_ref_accepts_main_and_local_unset() -> None:
+    require_trusted_dispatch_ref("refs/heads/main")
+    require_trusted_dispatch_ref("")
 
 
 def test_prompt_contains_required_specification_contract() -> None:
@@ -459,6 +471,7 @@ def test_cli_dispatch_uses_rest_issue_and_posts_once(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(agent_spec_dispatch, "_run_gh_api", api)
     monkeypatch.setattr(agent_spec_dispatch, "post_json", _post)
     monkeypatch.setenv("CURSOR_API_KEY", SECRET)
+    monkeypatch.delenv(DISPATCH_REF_ENV, raising=False)
     stdout = StringIO()
     assert main(["dispatch", "--issue", "18", "--repo", OWNER_REPO], stdout=stdout) == 0
     result = json.loads(stdout.getvalue())
@@ -467,6 +480,27 @@ def test_cli_dispatch_uses_rest_issue_and_posts_once(monkeypatch: pytest.MonkeyP
     assert json.loads(posts[0].decode("utf-8")) == request
     assert ISSUE_BODY_SECRET not in stdout.getvalue()
     assert SECRET not in stdout.getvalue()
+
+
+def test_cli_dispatch_rejects_non_main_actions_ref(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    posts: list[object] = []
+
+    def _post(url: str, headers: dict[str, str], body: bytes) -> HttpResponse:
+        posts.append((url, headers, body))
+        raise AssertionError("Cursor API must not be called")
+
+    monkeypatch.setattr(agent_spec_dispatch, "post_json", _post)
+    monkeypatch.setenv("CURSOR_API_KEY", SECRET)
+    monkeypatch.setenv(DISPATCH_REF_ENV, "refs/heads/cursor/issue-66-5f18")
+    stdout = StringIO()
+    assert main(["dispatch", "--issue", "18", "--repo", OWNER_REPO], stdout=stdout) == 1
+    captured = capsys.readouterr()
+    assert posts == []
+    assert "must run from main" in captured.err
+    assert SECRET not in captured.err
+    assert ISSUE_BODY_SECRET not in captured.err
 
 
 def test_cli_dispatch_rejects_wrong_repository(
@@ -589,6 +623,10 @@ def test_workflow_is_dedicated_manual_and_least_privilege() -> None:
     assert "needs:design" not in on_block
     assert "agent_spec_dispatch.py dispatch" in workflow
     assert 'dispatch --issue "${{ github.event.inputs.issue_number }}"' in workflow
+    assert "if: github.ref == 'refs/heads/main'" in workflow
+    assert "environment: capt-cursor" in workflow
+    assert "ref: main" in workflow
+    assert "CAPT_SPEC_DISPATCH_REF" in workflow
     assert "secrets.CURSOR_API_KEY" in workflow
     assert "api.cursor.com" not in workflow
     assert "issues: write" not in workflow

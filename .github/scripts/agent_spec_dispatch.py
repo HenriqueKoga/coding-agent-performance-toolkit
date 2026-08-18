@@ -41,6 +41,8 @@ type SpecDispatchOutcome = Literal["created"]
 
 NEEDS_DESIGN = "needs:design"
 SPEC_AGENT_IDENTITY = "spec-agent"
+REQUIRED_GITHUB_REF = "refs/heads/main"
+DISPATCH_REF_ENV = "CAPT_SPEC_DISPATCH_REF"
 _AGENT_ID_NAMESPACE = uuid.NAMESPACE_URL
 _ISSUE_NUMBER = re.compile(r"^[1-9][0-9]*$")
 
@@ -232,6 +234,15 @@ def interpret_cursor_create_response(issue_number: int, agent_id: str, response:
     )
 
 
+def require_trusted_dispatch_ref(ref: str | None = None) -> None:
+    """Refuse Actions runs that were not started from main."""
+    value = os.environ.get(DISPATCH_REF_ENV, "") if ref is None else ref
+    if not value:
+        return
+    if value != REQUIRED_GITHUB_REF:
+        raise SpecDispatchError("Spec Agent dispatch must run from main")
+
+
 def require_supported_repository(repository: str) -> str:
     owner, separator, name = repository.partition("/")
     if not separator or not owner or not name or "/" in name:
@@ -362,6 +373,7 @@ def _run_submit(issue_token: str, request_json: str, stdout: TextIO) -> int:
 
 
 def _run_dispatch(issue_token: str, repo_arg: str | None, stdout: TextIO) -> int:
+    require_trusted_dispatch_ref()
     issue_number = parse_issue_number(issue_token)
     repository = require_supported_repository(_repository_from_cli(repo_arg))
     issue = _read_issue(repository, issue_number)
