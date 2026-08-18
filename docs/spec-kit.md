@@ -31,10 +31,11 @@ GitHub
      └─ review state
 
 Cursor Cloud Agent
+  ├─ Spec Agent after manual workflow_dispatch (`needs:design`)
   └─ implementation after human agent:ready
 
 GitHub Actions
-  └─ deterministic validation / lifecycle / dispatch / approved-spec index
+  └─ deterministic validation / lifecycle / Spec Agent dispatch / implementation dispatch / approved-spec index
 
 Codex
   └─ independent review
@@ -59,6 +60,12 @@ Do not maintain two full copies of the same rules. If a principle changes, updat
 The Spec Agent is the specification author. It takes a bounded feature brief, uses this repository's pinned Spec Kit workflow, and stops after a specification-only review PR.
 
 The contract is agent-independent. Cursor's `/speckit-*` skills are the installed integration here; another Spec Kit-supported agent may invoke the same commands through its own integration. Do not invent a parallel specification format, skip the project-local template overrides, or treat Cursor-specific reasoning as specification semantics.
+
+### Starting the Spec Agent
+
+A human starts the Spec Agent for an existing Agent Task Issue in `needs:design` by running the dedicated `workflow_dispatch` workflow **Agent spec dispatch** with that Issue number. That workflow validates the Issue and creates one Cursor Cloud Agent in Spec Agent mode against `main`. It requires exactly one lifecycle label (`needs:design`) and exactly one `risk:*` label. It does not change lifecycle or risk labels, does not rewrite the Issue body, does not apply `agent:ready`, and does not run on Issue creation or `needs:design` labeling.
+
+Manual Cursor Cloud Agent launch remains possible. Implementation dispatch on `agent:ready` is unchanged. See [development.md](development.md).
 
 ### Input
 

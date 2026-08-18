@@ -105,7 +105,7 @@ Operational constraints for work in this repository:
 
 See [docs/development.md](docs/development.md) for setup, commands, and delivery details. See [docs/spec-kit.md](docs/spec-kit.md) for the Spec Agent contract and specification-layer workflow. Spec Kit does not replace this file's validation, Git/PR, or human-approval rules.
 
-When the task is specification authoring, follow that Spec Agent contract: use the repository-pinned Spec Kit integration, write artifacts under `specs/<feature>/`, open a specification-only review PR, and stop. Do not run `/speckit.implement` or `/speckit.taskstoissues`, mutate lifecycle or risk labels, dispatch another agent, merge, or change CAPT runtime code.
+When the task is specification authoring, follow that Spec Agent contract: use the repository-pinned Spec Kit integration, write artifacts under `specs/<feature>/`, open a specification-only review PR, and stop. Do not run `/speckit.implement` or `/speckit.taskstoissues`, mutate lifecycle or risk labels, dispatch another agent, merge, or change CAPT runtime code. A human may start that specification authoring for an open Agent Task in `needs:design` through the dedicated `workflow_dispatch` workflow. Spec Agent dispatch does not mutate lifecycle or risk labels and does not apply `agent:ready`.
 
 Source-of-truth split for Agent Tasks:
 
