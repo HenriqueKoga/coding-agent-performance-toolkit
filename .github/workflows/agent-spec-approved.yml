@@ -6,16 +6,62 @@ on:
       - closed
 
 concurrency:
-  group: agent-spec-approved-${{ github.event.pull_request.number }}
+  group: agent-spec-approved-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 permissions: {}
 
 jobs:
-  record:
-    name: Record approved specification
+  classify:
+    name: Classify specification merge
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      handoff: ${{ steps.classify.outputs.handoff }}
+      issue_number: ${{ steps.classify.outputs.issue_number }}
+    steps:
+      - name: Check out merged specification
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Classify capt-spec metadata
+        id: classify
+        shell: bash
+        env:
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          payload="$(python .github/scripts/agent_spec.py classify --event-file "${GITHUB_EVENT_PATH}")"
+          handoff="$(jq -r '.handoff' <<<"${payload}")"
+          echo "handoff=${handoff}" >> "${GITHUB_OUTPUT}"
+          if [[ "${handoff}" != "true" ]]; then
+            jq -r '.message' <<<"${payload}"
+            exit 0
+          fi
+          issue_number="$(jq -r '.issue_number' <<<"${payload}")"
+          if [[ ! "${issue_number}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "error: classify did not return a positive issue number" >&2
+            exit 1
+          fi
+          echo "issue_number=${issue_number}" >> "${GITHUB_OUTPUT}"
+
+  record:
+    name: Record approved specification
+    needs: classify
+    if: needs.classify.outputs.handoff == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: agent-spec-approved-issue-${{ needs.classify.outputs.issue_number }}
+      cancel-in-progress: false
     permissions:
       contents: read
       issues: write

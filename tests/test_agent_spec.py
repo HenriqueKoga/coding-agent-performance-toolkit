@@ -33,8 +33,10 @@ from agent_spec import (
     read_issue_comments,
     related_issue_numbers,
     require_related_issue_agreement,
+    require_spec_handoff_target,
     resolve_approved_spec,
     skipped_plan,
+    spec_target_from_mapping,
     validate_canonical_artifacts,
 )
 
@@ -99,6 +101,23 @@ def _write_artifacts(root: Path, spec_path: str = SPEC_PATH) -> None:
 
 def _approved_comment(issue_number: int = 58, pull_request_number: int = 56, spec: str = SPEC_PATH) -> str:
     return build_approved_comment(SpecMetadata(issue_number=issue_number, spec_path=spec), pull_request_number)
+
+
+def _issue_rest(
+    *,
+    number: int = 58,
+    state: str = "open",
+    labels: tuple[str, ...] = (NEEDS_DESIGN, "risk:medium"),
+    pull_request: bool = False,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "number": number,
+        "state": state,
+        "labels": [{"name": name} for name in labels],
+    }
+    if pull_request:
+        payload["pull_request"] = {"url": "https://github.com/example/repo/pull/58"}
+    return payload
 
 
 class _ScriptedGitHubApi:
@@ -307,6 +326,45 @@ def test_valid_merge_plans_one_managed_comment_and_human_review(tmp_path: Path) 
     assert "acceptance criteria" not in plan.comment_body.lower()
     assert SECRET not in plan.comment_body
     assert SECRET not in plan.message
+
+
+def test_handoff_rejects_targets_that_are_not_pending_agent_tasks(tmp_path: Path) -> None:
+    _write_artifacts(tmp_path)
+    event = load_merged_pull_request_event(_event_file(tmp_path, _spec_body()))
+    metadata = classify_spec_event(event)
+    assert metadata is not None
+    with pytest.raises(SpecApprovalError, match="lifecycle is agent:ready"):
+        plan_spec_handoff(event, metadata, (AGENT_READY, "risk:medium"), (), repo_root=tmp_path)
+    with pytest.raises(SpecApprovalError, match="lifecycle is agent:working"):
+        plan_spec_handoff(event, metadata, ("agent:working", "risk:medium"), (), repo_root=tmp_path)
+    with pytest.raises(SpecApprovalError, match="has no lifecycle label"):
+        plan_spec_handoff(event, metadata, ("risk:medium",), (), repo_root=tmp_path)
+    with pytest.raises(SpecApprovalError, match="is closed"):
+        plan_spec_handoff(
+            event,
+            metadata,
+            (NEEDS_DESIGN, "risk:medium"),
+            (),
+            repo_root=tmp_path,
+            issue_state="closed",
+        )
+    with pytest.raises(SpecApprovalError, match="is a pull request"):
+        plan_spec_handoff(
+            event,
+            metadata,
+            (NEEDS_DESIGN, "risk:medium"),
+            (),
+            repo_root=tmp_path,
+            is_pull_request=True,
+        )
+
+
+def test_spec_target_from_mapping_detects_pull_requests_without_reading_body() -> None:
+    target = spec_target_from_mapping(_issue_rest(pull_request=True), "issue")
+    assert target.is_pull_request is True
+    assert target.state == "open"
+    with pytest.raises(SpecApprovalError, match="is a pull request"):
+        require_spec_handoff_target(target)
 
 
 def test_needs_human_review_issue_keeps_lifecycle_and_records_comment(tmp_path: Path) -> None:
@@ -564,7 +622,7 @@ def test_cli_handoff_creates_comment_and_moves_design_to_human_review(
         [
             GitHubApiResponse(
                 returncode=0,
-                stdout=json.dumps({"labels": [{"name": NEEDS_DESIGN}, {"name": "risk:medium"}]}),
+                stdout=json.dumps(_issue_rest(labels=(NEEDS_DESIGN, "risk:medium"))),
                 stderr="",
             ),
             GitHubApiResponse(returncode=0, stdout="[]", stderr=""),
@@ -616,7 +674,7 @@ def test_cli_handoff_does_not_apply_agent_ready(tmp_path: Path, monkeypatch: pyt
         [
             GitHubApiResponse(
                 returncode=0,
-                stdout=json.dumps({"labels": [{"name": NEEDS_HUMAN_REVIEW}, {"name": "risk:low"}]}),
+                stdout=json.dumps(_issue_rest(labels=(NEEDS_HUMAN_REVIEW, "risk:low"))),
                 stderr="",
             ),
             GitHubApiResponse(returncode=0, stdout="[]", stderr=""),
@@ -650,6 +708,51 @@ def test_cli_handoff_does_not_apply_agent_ready(tmp_path: Path, monkeypatch: pyt
     assert commands == []
 
 
+def test_cli_handoff_rejects_non_pending_target_without_writing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_artifacts(tmp_path)
+    event = _event_file(tmp_path, _spec_body())
+    api = _ScriptedGitHubApi(
+        [
+            GitHubApiResponse(
+                returncode=0,
+                stdout=json.dumps(_issue_rest(labels=(AGENT_READY, "risk:medium"))),
+                stderr="",
+            )
+        ]
+    )
+    writes: list[tuple[str, str, str]] = []
+    commands: list[tuple[str, ...]] = []
+
+    def _write(method: str, path: str, body: str) -> GitHubApiResponse:
+        writes.append((method, path, body))
+        raise AssertionError("comment write must not run")
+
+    def _command(args: Sequence[str]) -> GitHubApiResponse:
+        commands.append(tuple(args))
+        raise AssertionError("label update must not run")
+
+    monkeypatch.setattr(agent_spec, "_run_gh_api", api)
+    monkeypatch.setattr(agent_spec, "_run_gh_api_write", _write)
+    monkeypatch.setattr(agent_spec, "_run_gh_command", _command)
+    stdout = StringIO()
+    assert (
+        main(
+            ["handoff", "--event-file", str(event), "--repo-root", str(tmp_path), "--repo", "owner/repo"],
+            stdout=stdout,
+        )
+        == 1
+    )
+    captured = capsys.readouterr()
+    assert stdout.getvalue() == ""
+    assert writes == []
+    assert commands == []
+    assert api.paths == ["repos/owner/repo/issues/58"]
+    assert "needs:design or needs:human-review" in captured.err
+    assert SECRET not in captured.err
+
+
 def test_comment_read_retries_503_then_succeeds() -> None:
     api = _ScriptedGitHubApi(
         [
@@ -675,7 +778,11 @@ def test_workflow_is_dedicated_and_does_not_rewrite_issue_bodies() -> None:
     assert "pull_request:" in workflow
     assert "closed" in workflow
     assert "github.event.pull_request.merged == true" in workflow
+    assert "agent_spec.py classify" in workflow
     assert "agent_spec.py handoff" in workflow
+    assert workflow.index("agent_spec.py classify") < workflow.index("agent_spec.py handoff")
+    assert "agent-spec-approved-issue-${{ needs.classify.outputs.issue_number }}" in workflow
+    assert "cancel-in-progress: false" in workflow
     assert "merge_commit_sha" in workflow
     assert "issues: write" in workflow
     assert "--body" not in workflow

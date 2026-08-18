@@ -29,13 +29,13 @@ from agent_lifecycle import (
     github_http_status_from_stderr,
     has_lifecycle_opt_out,
     is_retryable_github_http_status,
-    read_issue_label_names,
 )
 
 type SpecHandoffOutcome = Literal["skipped", "created", "updated", "unchanged"]
 type CommentAction = Literal["create", "update", "unchanged"]
 
 NEEDS_DESIGN = "needs:design"
+SPEC_HANDOFF_LIFECYCLES: tuple[str, ...] = (NEEDS_DESIGN, NEEDS_HUMAN_REVIEW)
 REQUIRED_BASE_REF = "main"
 SPEC_METADATA_VERSION = "v1"
 APPROVED_MARKER_VERSION = "v1"
@@ -102,6 +102,14 @@ class MergedPullRequestEvent:
 class IssueComment:
     comment_id: int
     body: str
+
+
+@dataclass(frozen=True, slots=True)
+class SpecTargetIssue:
+    number: int
+    state: str
+    labels: tuple[str, ...]
+    is_pull_request: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -326,6 +334,28 @@ def skip_message(event: MergedPullRequestEvent) -> str:
     )
 
 
+def require_spec_handoff_target(target: SpecTargetIssue) -> None:
+    """Fail closed unless the target is an open Issue in specification-stage lifecycle."""
+    _require_positive_issue_number(target.number)
+    if target.is_pull_request:
+        raise SpecApprovalError(f"#{target.number} is a pull request; approved-spec handoff requires a GitHub Issue")
+    if target.state != "open":
+        raise SpecApprovalError(
+            f"Issue #{target.number} is {target.state}; approved-spec handoff requires an open Issue"
+        )
+    present = tuple(label for label in LIFECYCLE_LABELS if label in target.labels)
+    if not present:
+        raise SpecApprovalError(f"Issue #{target.number} has no lifecycle label")
+    if len(present) > 1:
+        rendered = ", ".join(present)
+        raise SpecApprovalError(f"Issue #{target.number} has multiple lifecycle labels: {rendered}")
+    if present[0] not in SPEC_HANDOFF_LIFECYCLES:
+        raise SpecApprovalError(
+            f"Issue #{target.number} lifecycle is {present[0]}; "
+            "approved-spec handoff requires needs:design or needs:human-review"
+        )
+
+
 def plan_spec_handoff(
     event: MergedPullRequestEvent,
     metadata: SpecMetadata,
@@ -333,10 +363,20 @@ def plan_spec_handoff(
     comments: Sequence[IssueComment],
     *,
     repo_root: Path,
+    issue_state: str = "open",
+    is_pull_request: bool = False,
 ) -> SpecHandoffPlan:
     """Plan the managed comment upsert and any allowed lifecycle label transition."""
     if event.number <= 0:
         raise SpecApprovalError("pull request number must be positive")
+    require_spec_handoff_target(
+        SpecTargetIssue(
+            number=metadata.issue_number,
+            state=issue_state,
+            labels=tuple(issue_labels),
+            is_pull_request=is_pull_request,
+        )
+    )
     validate_canonical_artifacts(repo_root, metadata)
     issue_add, issue_remove = _plan_issue_labels(metadata.issue_number, issue_labels)
     if AGENT_READY in issue_add:
@@ -372,6 +412,73 @@ def plan_spec_handoff(
         issue_remove=issue_remove,
         mutate_issue_body=False,
         message=message,
+    )
+
+
+def read_spec_target_issue(
+    repository: str,
+    issue_number: int,
+    *,
+    run_api: Callable[[str], GitHubApiResponse] | None = None,
+    sleep: Callable[[float], None] | None = None,
+    notify: Callable[[str], None] | None = None,
+) -> SpecTargetIssue:
+    """Read Issue identity from GitHub REST without returning the Issue body."""
+    _require_positive_issue_number(issue_number)
+    owner_repo = _require_owner_repo(repository)
+    runner = _run_gh_api if run_api is None else run_api
+    sleeper = time.sleep if sleep is None else sleep
+    log = _print_stderr if notify is None else notify
+    path = f"repos/{owner_repo}/issues/{issue_number}"
+    last_status: int | None = None
+    attempt = 0
+    for attempt in range(1, GITHUB_REST_READ_MAX_ATTEMPTS + 1):
+        response = runner(path)
+        if response.returncode == 0:
+            target = spec_target_from_mapping(
+                _load_json_object_text(response.stdout, "GitHub REST issue"),
+                "GitHub REST issue",
+            )
+            if target.number != issue_number:
+                raise SpecApprovalError("GitHub REST issue number does not match capt-spec metadata")
+            return target
+        last_status = github_http_status_from_stderr(response.stderr)
+        if not is_retryable_github_http_status(last_status) or attempt == GITHUB_REST_READ_MAX_ATTEMPTS:
+            break
+        log(
+            f"GitHub REST issue #{issue_number} read returned HTTP {last_status} "
+            f"(attempt {attempt}/{GITHUB_REST_READ_MAX_ATTEMPTS}); retrying"
+        )
+        sleeper(GITHUB_REST_READ_RETRY_DELAY_SECONDS)
+    raise SpecApprovalError(_rest_read_failure_message(f"issue #{issue_number}", last_status, attempt))
+
+
+def spec_target_from_mapping(payload: Mapping[str, object], what: str) -> SpecTargetIssue:
+    number = payload.get("number")
+    if not isinstance(number, int) or isinstance(number, bool) or number <= 0:
+        raise SpecApprovalError(f"{what} number must be a positive integer")
+    state = payload.get("state")
+    if not isinstance(state, str) or not state:
+        raise SpecApprovalError(f"{what} state is not a string")
+    labels_value = payload.get("labels")
+    if not isinstance(labels_value, list):
+        raise SpecApprovalError(f"{what} is missing labels")
+    names: list[str] = []
+    for item in labels_value:
+        if isinstance(item, str):
+            names.append(item)
+            continue
+        if not isinstance(item, dict):
+            raise SpecApprovalError(f"{what} labels are invalid")
+        name = item.get("name")
+        if not isinstance(name, str):
+            raise SpecApprovalError(f"{what} labels are invalid")
+        names.append(name)
+    return SpecTargetIssue(
+        number=number,
+        state=state,
+        labels=tuple(names),
+        is_pull_request="pull_request" in payload,
     )
 
 
@@ -617,6 +724,13 @@ def _load_json_value(text: str) -> object:
         return json.loads(text)
     except RecursionError, json.JSONDecodeError, ValueError:
         return None
+
+
+def _load_json_object_text(text: str, what: str) -> dict[str, object]:
+    parsed = _load_json_value(text)
+    if not isinstance(parsed, dict):
+        raise SpecApprovalError(f"{what} must be a JSON object")
+    return parsed
 
 
 def _load_label_list(text: str, what: str) -> tuple[str, ...]:
@@ -894,12 +1008,18 @@ def _run_handoff(event_file: Path, repo_root: Path, repo_arg: str | None, stdout
         print(json.dumps(plan.to_json_dict(), allow_nan=False), file=stdout)
         return 0
     repository = _repository_from_cli(repo_arg)
-    try:
-        labels = read_issue_label_names(repository, metadata.issue_number)
-        comments = read_issue_comments(repository, metadata.issue_number)
-    except LifecycleError as exc:
-        raise SpecApprovalError(str(exc)) from None
-    plan = plan_spec_handoff(event, metadata, labels, comments, repo_root=repo_root)
+    target = read_spec_target_issue(repository, metadata.issue_number)
+    require_spec_handoff_target(target)
+    comments = read_issue_comments(repository, metadata.issue_number)
+    plan = plan_spec_handoff(
+        event,
+        metadata,
+        target.labels,
+        comments,
+        repo_root=repo_root,
+        issue_state=target.state,
+        is_pull_request=target.is_pull_request,
+    )
     if AGENT_READY in plan.issue_add:
         raise SpecApprovalError("refusing to add agent:ready automatically")
     if plan.mutate_issue_body:
