@@ -16,7 +16,15 @@ from coding_agent_performance.trace.collector import (
     CollectorStats,
     OtlpHttpCollector,
 )
-from coding_agent_performance.trace.rendering import render_capture_list, render_json, render_text
+from coding_agent_performance.trace.comparison import compare_summaries
+from coding_agent_performance.trace.rendering import (
+    render_capture_list,
+    render_comparison_json,
+    render_comparison_text,
+    render_json,
+    render_text,
+)
+from coding_agent_performance.trace.report import TraceSummary
 from coding_agent_performance.trace.storage import (
     CaptureListError,
     CaptureStorageError,
@@ -31,7 +39,7 @@ from coding_agent_performance.trace.summary import summarize_capture
 
 trace_app = typer.Typer(
     name="trace",
-    help="Collect, list, and summarize coding-agent telemetry.",
+    help="Collect, list, summarize, and compare coding-agent telemetry.",
     no_args_is_help=True,
     add_completion=False,
 )
@@ -88,20 +96,59 @@ def summarize(
 ) -> None:
     """Summarize a local CAPT capture without sending data anywhere."""
     selected = resolve_summarize_capture(capture, latest=latest)
-    try:
-        summary = summarize_capture(selected)
-    except CaptureError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(1) from None
-    except OSError as exc:
-        detail = exc.strerror or str(exc) or "read error"
-        typer.echo(f"Invalid capture at {selected.name}: {detail}", err=True)
-        raise typer.Exit(1) from None
+    summary = summarize_or_fail(selected)
     if output_format is OutputFormat.JSON:
         sys.stdout.write(render_json(summary))
         sys.stdout.write("\n")
         return
     typer.echo(render_text(summary))
+
+
+@trace_app.command("compare")
+def compare(
+    baseline: Annotated[
+        Path,
+        typer.Argument(help="Baseline CAPT JSONL capture file."),
+    ],
+    candidate: Annotated[
+        Path,
+        typer.Argument(help="Candidate CAPT JSONL capture file."),
+    ],
+    output_format: Annotated[
+        OutputFormat,
+        typer.Option("--format", help="Comparison output format."),
+    ] = OutputFormat.TEXT,
+) -> None:
+    """Compare two local CAPT captures without sending data anywhere."""
+    if same_capture_file(baseline, candidate):
+        summary = summarize_or_fail(baseline)
+        result = compare_summaries(summary, summary)
+    else:
+        result = compare_summaries(summarize_or_fail(baseline), summarize_or_fail(candidate))
+    if output_format is OutputFormat.JSON:
+        sys.stdout.write(render_comparison_json(result))
+        sys.stdout.write("\n")
+        return
+    typer.echo(render_comparison_text(result))
+
+
+def summarize_or_fail(path: Path) -> TraceSummary:
+    try:
+        return summarize_capture(path)
+    except CaptureError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from None
+    except OSError as exc:
+        detail = exc.strerror or str(exc) or "read error"
+        typer.echo(f"Invalid capture at {path.name}: {detail}", err=True)
+        raise typer.Exit(1) from None
+
+
+def same_capture_file(left: Path, right: Path) -> bool:
+    try:
+        return left.samefile(right)
+    except OSError:
+        return False
 
 
 def resolve_summarize_capture(capture: Path | None, *, latest: bool) -> Path:

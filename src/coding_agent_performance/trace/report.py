@@ -221,6 +221,18 @@ class Insights:
 
 
 @dataclass(frozen=True, slots=True)
+class ComparisonAvailability:
+    tool_calls: bool
+    tool_failures: bool
+    tool_result_bytes: bool
+    model_requests: bool
+    estimated_cost_usd_micros: bool
+    input_tokens: bool
+    output_tokens: bool
+    session_compactions: bool
+
+
+@dataclass(frozen=True, slots=True)
 class TraceSummary:
     schema_version: int
     capture: CaptureInfo
@@ -230,3 +242,4 @@ class TraceSummary:
     activity: ActivityStats
     coverage: CoverageStats
     insights: Insights
+    comparison_availability: ComparisonAvailability

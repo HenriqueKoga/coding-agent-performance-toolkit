@@ -21,6 +21,9 @@ class ModelRequest:
     cache_creation_tokens: int
     estimated_cost_usd_micros: int
     event_sequence: int | None
+    has_input_tokens: bool = True
+    has_output_tokens: bool = True
+    has_estimated_cost_usd_micros: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +50,7 @@ class ToolExecution:
     error_type: str | None
     tool_use_id: str | None
     event_sequence: int | None
+    success_valid: bool = True
 
 
 @dataclass(frozen=True, slots=True)

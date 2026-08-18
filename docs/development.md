@@ -27,6 +27,7 @@ uv run capt doctor
 uv run capt trace collect claude-code --help
 uv run capt trace list --help
 uv run capt trace summarize --help
+uv run capt trace compare --help
 uv run ruff format .
 uv run ruff format --check .
 uv run ruff check .
