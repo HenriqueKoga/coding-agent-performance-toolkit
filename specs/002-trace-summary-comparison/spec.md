@@ -24,7 +24,7 @@ A developer has two CAPT JSONL captures representing a baseline run and a candid
 
 1. **Given** two captures where an allowlisted metric is observed on both sides with the same value, **When** they are compared, **Then** that metric reports a delta of `0`.
 2. **Given** a candidate with higher and lower observed metric values than the baseline, **When** compared, **Then** signed absolute deltas preserve direction exactly (`candidate - baseline`).
-3. **Given** an observed baseline value of zero, **When** the observed candidate is non-zero, **Then** the absolute delta remains deterministic and no percentage, NaN, or Infinity is produced.
+3. **Given** a metric whose telemetry provides affirmative coverage and whose observed baseline value is zero, **When** the observed candidate is non-zero, **Then** the absolute delta remains deterministic and no percentage, NaN, or Infinity is produced.
 4. **Given** a metric whose telemetry is unavailable on either side, **When** compared, **Then** CAPT MUST mark that metric unavailable and MUST NOT manufacture a numeric delta from a default zero.
 5. **Given** two captures from providers supported by the same provider-neutral summary contract, **When** compared, **Then** comparison uses only normalized summary values plus normalized metric-availability metadata.
 
@@ -42,7 +42,8 @@ A developer or local script wants the comparison as structured JSON with the sam
 ### Edge Cases
 
 - Either input path is missing, unreadable, or not a valid CAPT capture.
-- A metric has an observed value of zero on one or both captures.
+- A metric has an observed value of zero only when its telemetry provides affirmative evidence that zero is an observed value rather than absence of evidence.
+- `model_usage.requests` has no observed-zero state in v1: at least one normalized API-request event makes it available with a positive count; no API-request event means the metric is unavailable rather than observed zero.
 - A metric is unavailable because its telemetry family, series, event, or required attribute was not observed.
 - One capture has metric availability while the other does not.
 - Baseline is greater than candidate, producing a negative delta.
@@ -69,7 +70,7 @@ A developer or local script wants the comparison as structured JSON with the sam
 - **FR-005**: When a metric is available on both baseline and candidate, it MUST report integer `baseline`, integer `candidate`, and signed integer `delta`, where `delta = candidate - baseline`.
 - **FR-006**: When a metric is unavailable on either side, the comparison slot MUST remain present but MUST be explicitly unavailable; its `baseline`, `candidate`, and `delta` MUST be `null` in JSON and MUST NOT be computed from fallback zeros.
 - **FR-007**: Availability MUST be tracked per metric, not inferred from the final numeric value. In particular:
-  - model request availability MUST distinguish API-request-event evidence from metric-only/no-usage captures;
+  - model request availability MUST require at least one normalized API-request event; because v1 has no independent zero-request coverage signal, absence of API-request events MUST mean unavailable rather than observed zero;
   - estimated cost, input tokens, and output tokens MUST be independently available only when their own source data is observed;
   - the normalization boundary MUST preserve per-field presence for API request cost/input/output attributes instead of coercing missing/invalid values into indistinguishable observed zeros;
   - tool calls/failures MUST distinguish observed tool-event coverage from captures without tool telemetry;
@@ -104,7 +105,8 @@ A developer or local script wants the comparison as structured JSON with the sam
 
 - Evidence is limited to the eight allowlisted aggregates plus boolean/provider-neutral availability needed to avoid false zero comparisons.
 - Availability is derived from whether the relevant normalized telemetry evidence was observed and complete enough for that metric.
-- A numeric zero is comparable only when availability is true for that side.
+- A numeric zero is comparable only when the metric has an affirmative coverage signal proving that zero is observed; absence of events or series is never sufficient by itself.
+- `model_usage.requests` is available only when at least one normalized API-request event exists in v1; otherwise it is unavailable.
 - Delta is exact integer subtraction (`candidate - baseline`) only when both sides are available.
 - No percentage delta, winner, score, quality inference, root cause, or recommendation is part of v1.
 
@@ -142,6 +144,7 @@ A developer or local script wants the comparison as structured JSON with the sam
 - Generic experiment/comparison plugin framework
 - Exposing provider-specific provenance in comparison output
 - Changing the existing trace-summary public schema/version
+- Introducing a new telemetry signal solely to prove zero model requests
 - New runtime dependencies, LLMs, databases, or external services
 
 ### Validation
@@ -156,7 +159,7 @@ uv build --clear
 git diff --check
 ```
 
-Plus focused tests covering observed zero versus unavailable telemetry for all eight comparison slots, mixed availability between baseline/candidate, normalization-field presence, same-file snapshot reuse, and deterministic text/JSON rendering.
+Plus focused tests covering observed zero versus unavailable telemetry where an affirmative zero-coverage signal exists, explicit `model_requests` unavailable semantics when no API-request event exists, mixed availability between baseline/candidate, normalization-field presence, same-file snapshot reuse, and deterministic text/JSON rendering.
 
 ### Human decisions
 
@@ -171,7 +174,7 @@ Plus focused tests covering observed zero versus unavailable telemetry for all e
 ### Measurable Outcomes
 
 - **SC-001**: No allowlisted metric produces a numeric delta when either side lacks evidence that the metric was observed.
-- **SC-002**: An observed zero remains distinguishable from unavailable telemetry for every allowlisted metric.
+- **SC-002**: For metrics whose telemetry provides an affirmative zero-coverage signal, observed zero remains distinguishable from unavailable telemetry; `model_usage.requests` is explicitly excluded from an observed-zero requirement in v1 and is unavailable when no normalized API-request event exists.
 - **SC-003**: Text and JSON expose the same eight metric slots, availability states, and comparable numeric values.
 - **SC-004**: Comparison memory usage does not scale with raw capture size beyond the existing bounded summarization behavior.
 - **SC-005**: Successful comparison output contains no input paths, identifiers, raw payload content, or provider-specific provenance.
