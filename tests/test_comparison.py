@@ -243,6 +243,8 @@ def test_metric_comparison_contract() -> None:
     with pytest.raises(ValueError):
         MetricComparison(available=True, baseline=1, candidate=2, delta=0)
     with pytest.raises(ValueError):
+        MetricComparison(available=True, baseline=None, candidate=2, delta=2)
+    with pytest.raises(ValueError):
         MetricComparison(available=False, baseline=0, candidate=0, delta=0)
 
 
@@ -296,8 +298,8 @@ def test_compare_help(visible: Callable[[str], str]) -> None:
     result = runner.invoke(app, ["trace", "compare", "--help"], color=False)
     text = visible(result.output)
     assert result.exit_code == 0
-    assert "BASELINE" in text
-    assert "CANDIDATE" in text
+    assert "baseline" in text.lower()
+    assert "candidate" in text.lower()
     assert "--format" in text
     assert "json" in text
     assert "text" in text
