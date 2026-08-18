@@ -47,13 +47,13 @@ Add `capt trace handoff CAPTURE` as a local deterministic export command. One ex
 
 ## CAPT design notes
 
-- **Privacy impact**: potential, contained by an explicit compact allowlist. Output may include safe filename, capture source, integer aggregates, `usage_source`, nullable success-rate basis points, and existing insight evidence (including already-allowlisted tool names). No prompts, responses, tool content, source code, secrets, identifiers, or absolute paths.
-- **Deterministic evidence**: copied summary aggregates and existing insight findings only. No intent, TODOs, recommendations, or root cause.
+- **Privacy impact**: potential, contained by an explicit compact allowlist plus a closed capture-source sanitizer. Output may include filename, allowlisted `source` (`claude-code` or `unknown`), integer aggregates, `usage_source`, nullable success-rate basis points, and existing insight evidence (including already-allowlisted tool names). No prompts, responses, tool content, source code, secrets, identifiers, absolute paths, or raw envelope `source`/`schema_version` values.
+- **Deterministic evidence**: copied summary aggregates and existing insight findings only. Source identity is allowlisted, not inferred. No intent, TODOs, recommendations, or root cause.
 - **Bounded-memory impact**: no new accumulator state. One immutable compact DTO built from the finished summary.
-- **Provider neutrality**: `handoff_from_summary(TraceSummary)` in the trace domain. No adapter change.
-- **Compatibility**: additive `capt trace handoff` and a new handoff JSON v1 schema. Existing summary and comparison schemas/commands unchanged.
-- **Validation**: full AGENTS.md set plus synthetic handoff smoke tests and privacy-exclusion tests.
-- **Out of scope**: prompts/responses, intent reconstruction, source snapshots, TODOs, LLM, Context Ledger, checkpoints, resume/injection, `--latest`, `--output`, Markdown, generic artifact framework, databases, network, new dependencies.
+- **Provider neutrality**: `handoff_from_summary(TraceSummary)` in the trace domain. Closed source allowlist lives in `handoff.py` as string identifiers; do not import the Claude Code adapter. No adapter change.
+- **Compatibility**: additive `capt trace handoff` and a new handoff JSON v1 schema. Existing summary and comparison schemas, commands, and error text unchanged.
+- **Validation**: full AGENTS.md set plus synthetic text/JSON smoke invocations and privacy-exclusion tests.
+- **Out of scope**: prompts/responses, intent reconstruction, source snapshots, TODOs, LLM, Context Ledger, checkpoints, resume/injection, `--latest`, `--output`, Markdown, generic artifact framework, databases, network, new dependencies, changing CaptureError/summarize error interpolation.
 - **Human decisions**: stop if useful output would require prompts, responses, source-code capture, remote storage, or model inference. Do not apply `agent:ready` or risk labels from Spec Kit.
 
 ## Project Structure
@@ -107,6 +107,8 @@ Prefer `src/coding_agent_performance/trace/handoff.py` with one concrete repeate
 
 ```python
 HANDOFF_SCHEMA_VERSION: Final = 1
+HANDOFF_CAPTURE_SOURCES: Final = frozenset({"claude-code"})
+HANDOFF_UNKNOWN_SOURCE: Final = "unknown"
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,13 +156,14 @@ Exact names may follow existing module conventions. Do not use a dict, registry,
 
 `handoff_from_summary(summary: TraceSummary) -> TraceHandoff` copies:
 
-- `capture.source` and `capture.file` only
+- `capture.file` unchanged
+- `capture.source` only after closed-allowlist mapping: `claude-code` stays `claude-code`; any other string becomes `unknown`
 - the existing `sessions` value
 - scalar model-usage fields listed above, including `tokens.input` / `tokens.output` and excluding cache tokens, durations, and breakdowns
 - scalar tool fields listed above, including `success_rate_bps`, and excluding `input_bytes`, durations, and `by_name`
 - the existing `insights` value unchanged
 
-It MUST NOT copy activity, coverage, comparison availability, envelopes, batch counts, or received-at timestamps.
+It MUST NOT copy activity, coverage, comparison availability, envelopes, batch counts, or received-at timestamps. It MUST NOT import `adapters.claude_code`.
 
 ## CLI orchestration
 
@@ -173,15 +176,17 @@ capt trace handoff CAPTURE [--format text|json]
 The command should:
 
 1. require exactly one explicit `Path` argument;
-2. call existing `summarize_or_fail()` / `summarize_capture()`;
-3. call `handoff_from_summary()`;
-4. render text or JSON;
-5. write JSON to stdout with a trailing newline, matching summarize/compare JSON;
-6. map input/OSError failures to concise non-zero errors without traceback or absolute-path disclosure.
+2. call existing `summarize_capture()`;
+3. map `CaptureError` and `OSError` through a handoff-specific helper that prints basename plus a closed, payload-free reason;
+4. call `handoff_from_summary()`;
+5. render text or JSON;
+6. write JSON to stdout with a trailing newline, matching summarize/compare JSON.
+
+Unsupported `schema_version` MUST render as a fixed reason such as `unsupported schema_version` with no interpolated value. Envelope `source`, payload snippets, and absolute paths MUST NOT appear. Do not reuse `summarize_or_fail()` on this path, because it currently echoes `str(CaptureError)` including the raw schema version. Do not change `summarize_or_fail()`, `CaptureError`, summarize, or compare.
 
 Do not add `--latest`. Do not add `--output`. Do not accept two capture paths.
 
-Reuse existing `OutputFormat` and summarize error mapping. If help text on `trace_app` currently lists collect/list/summarize/compare, update it to include handoff without changing those commands.
+Reuse existing `OutputFormat`. If help text on `trace_app` currently lists collect/list/summarize/compare, update it to include handoff without changing those commands.
 
 ## Rendering
 
@@ -253,7 +258,7 @@ Complete v1 example (synthetic):
 }
 ```
 
-No provider provenance, paths, identifiers, scores, recommendations, TODOs, or additional metadata may be added to handoff JSON v1. The handoff schema version is independent from `TraceSummary.schema_version`.
+No provider provenance, paths, identifiers, scores, recommendations, TODOs, arbitrary envelope `source` strings, or additional metadata may be added to handoff JSON v1. The handoff schema version is independent from `TraceSummary.schema_version`.
 
 ## Expected implementation touch points
 
@@ -281,10 +286,12 @@ uv run ty check
 uv run pytest
 uv build --clear
 git diff --check
+uv run capt trace handoff tests/fixtures/claude_code/synthetic-capture.jsonl
+uv run capt trace handoff tests/fixtures/claude_code/synthetic-capture.jsonl --format json
 ```
 
-Focused validation must cover the exact JSON v1 contract, empty/minimal traces, insight copy versus summarize, `success_rate_bps` nullability, text/JSON agreement, privacy exclusions, CLI errors, stdout-only behavior, and unchanged existing summarize/compare rendering.
+Focused validation must cover the exact JSON v1 contract, empty/minimal traces, insight copy versus summarize, `success_rate_bps` nullability, allowlisted versus `unknown` capture source, text/JSON agreement, privacy exclusions including stderr `schema_version` markers, CLI errors, stdout-only behavior, synthetic text/JSON smoke invocations of `capt trace handoff`, and unchanged existing summarize/compare rendering.
 
 ## Complexity Tracking
 
-No constitution violations. The only new types are the compact handoff DTOs required to keep the public artifact smaller than `TraceSummary` without making rendering the source of truth.
+No constitution violations. The only new types are the compact handoff DTOs required to keep the public artifact smaller than `TraceSummary`. The closed source allowlist and handoff-specific error mapper are privacy sanitizers, not a generic framework.

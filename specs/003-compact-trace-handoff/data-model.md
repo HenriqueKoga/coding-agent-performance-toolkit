@@ -20,6 +20,7 @@ Finished compact artifact for one capture.
 Validation:
 
 - Construction copies values from one `TraceSummary`. It does not recompute aggregates or insight thresholds.
+- `capture.source` is allowlisted while copying identity; it is not a new telemetry mapping.
 - No path, identifier, payload, activity, coverage, or narrative field is present.
 - Field order in the public JSON contract is fixed; see `contracts/handoff-json-v1.md`.
 
@@ -27,7 +28,7 @@ Validation:
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `source` | `str` | Existing capture source, e.g. `claude-code` |
+| `source` | `str` | Closed allowlist: `claude-code`, else `unknown`. Never a raw arbitrary envelope source. |
 | `file` | `str` | Filename only, never an absolute path |
 
 ## HandoffModelUsage

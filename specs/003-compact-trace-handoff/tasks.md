@@ -46,7 +46,7 @@
 - [ ] T005 Copy `insights` unchanged in `src/coding_agent_performance/trace/handoff.py` and assert in `tests/test_handoff.py` that findings match the source summary object-for-object
 - [ ] T006 Set `schema_version` to `1` in `src/coding_agent_performance/trace/handoff.py` independently from `TraceSummary.schema_version`
 - [ ] T007 Assert in `tests/test_handoff.py` that `tools.success_rate_bps` is `None` when `calls == 0` and equals the summary property otherwise
-- [ ] T008 Assert in `tests/test_handoff.py` that `capture.file` is the summary filename only and that prompt/assistant fields remain integer counts
+- [ ] T008 Assert in `tests/test_handoff.py` that `capture.file` is the summary filename only, prompt/assistant fields remain integer counts, `claude-code` sources are preserved, and an arbitrary synthetic source string is mapped to `unknown` without appearing in the handoff
 
 ---
 
@@ -59,12 +59,12 @@
 ### Tests
 
 - [ ] T009 [P] [US1] Add CLI success tests in `tests/test_handoff.py` for one explicit synthetic capture covering empty/minimal traces and traces with insight findings
-- [ ] T010 [P] [US1] Add CLI error tests in `tests/test_handoff.py` for missing path, unreadable path, invalid capture, extra arguments, and unexpected `--latest` or `--output`, asserting non-zero exit, no traceback, no payloads, and no absolute-path disclosure
+- [ ] T010 [P] [US1] Add CLI error tests in `tests/test_handoff.py` for missing path, unreadable path, invalid capture, extra arguments, unexpected `--latest` or `--output`, and an envelope whose `schema_version` is a distinctive synthetic marker string; assert non-zero exit, no traceback, no payloads, no absolute-path disclosure, and that the marker string is absent from stderr
 - [ ] T011 [P] [US1] Add tests in `tests/test_handoff.py` proving text output contains no goals, decisions, TODOs, recommendations, or next-action section
 
 ### Implementation
 
-- [ ] T012 [US1] Add `capt trace handoff CAPTURE` in `src/coding_agent_performance/trace/cli.py` using existing `summarize_or_fail()` and `handoff_from_summary()`
+- [ ] T012 [US1] Add `capt trace handoff CAPTURE` in `src/coding_agent_performance/trace/cli.py` using existing `summarize_capture()` and `handoff_from_summary()`; map `CaptureError`/`OSError` through a handoff-specific payload-free helper and do not reuse `summarize_or_fail()`
 - [ ] T013 [US1] Keep the command stdout-only in `src/coding_agent_performance/trace/cli.py`; do not add `--latest` or `--output`
 - [ ] T014 [US1] Add deterministic text rendering of `TraceHandoff` in `src/coding_agent_performance/trace/rendering.py` that reports only allowlisted identity, aggregates, success-rate nullability, and existing insight line wording
 - [ ] T015 [US1] Update `trace_app` help in `src/coding_agent_performance/trace/cli.py` to mention handoff without changing collect, list, summarize, or compare behavior
@@ -83,7 +83,7 @@
 
 - [ ] T016 [P] [US2] Assert the exact JSON v1 contract from `specs/003-compact-trace-handoff/contracts/handoff-json-v1.md` and `plan.md` in `tests/test_handoff.py`: top-level key order, `schema_version == 1`, nested key order, integer values, `success_rate_bps` nullability, empty-array versus `null` insights
 - [ ] T017 [P] [US2] Add repeated deterministic serialization tests in `tests/test_handoff.py` and reject extra top-level or nested fields
-- [ ] T018 [P] [US2] Add text/JSON agreement tests in `tests/test_handoff.py` for identity, aggregates, insight presence/absence, and privacy exclusions against synthetic payload/path/prompt strings
+- [ ] T018 [P] [US2] Add text/JSON agreement tests in `tests/test_handoff.py` for identity, aggregates, insight presence/absence, allowlisted/`unknown` source, and privacy exclusions against synthetic payload/path/prompt/source strings
 
 ### Implementation
 
@@ -99,8 +99,8 @@
 - [ ] T021 [P] Document `capt trace handoff`, stdout-only behavior, and the exact JSON v1 contract in `docs/product.md`, `docs/architecture.md`, `docs/summary-format.md`, and `docs/development.md` without duplicating the full feature spec
 - [ ] T022 [P] Confirm in `tests/test_handoff.py` or existing summary/comparison tests that `capt trace summarize` and `capt trace compare` public text/JSON output is unchanged
 - [ ] T023 [P] Confirm no adapter, collector, capture-schema, insight-threshold, or comparison-schema changes in `src/coding_agent_performance/adapters/claude_code/`, `src/coding_agent_performance/trace/capture.py`, `src/coding_agent_performance/trace/insights.py`, and `src/coding_agent_performance/trace/comparison.py`
-- [ ] T024 [P] Confirm all fixtures/examples are synthetic and that handoff stdout/stderr cannot contain prompt, tool-payload, secret, or absolute-path strings from those fixtures
-- [ ] T025 Run `uv sync --frozen --all-groups`, `uv run ruff format --check .`, `uv run ruff check .`, `uv run ty check`, `uv run pytest`, `uv build --clear`, and `git diff --check`
+- [ ] T024 [P] Confirm all fixtures/examples are synthetic and that handoff stdout/stderr cannot contain prompt, tool-payload, secret, absolute-path, arbitrary-source, or envelope `schema_version` marker strings from those fixtures
+- [ ] T025 Run `uv sync --frozen --all-groups`, `uv run ruff format --check .`, `uv run ruff check .`, `uv run ty check`, `uv run pytest`, `uv build --clear`, `git diff --check`, and smoke `uv run capt trace handoff tests/fixtures/claude_code/synthetic-capture.jsonl` plus the same command with `--format json`
 
 ## Dependencies
 
@@ -132,6 +132,8 @@ MVP is Phase 2 plus User Story 1: one explicit capture produces a compact text e
 - Issue #37 is the single operational implementation task after specification approval.
 - Do not invent goals, decisions, TODOs, or source-code context.
 - Do not copy the full `TraceSummary` into JSON and call it compact.
+- Do not echo arbitrary envelope `source` or `schema_version` values.
+- Do not reuse `summarize_or_fail()` for handoff.
 - Do not change insight thresholds or recompute findings.
 - Do not add a generic artifact framework, registry, or `artifacts/` package.
 - `/speckit.taskstoissues` and `/speckit.implement` are not part of the CAPT production lifecycle.

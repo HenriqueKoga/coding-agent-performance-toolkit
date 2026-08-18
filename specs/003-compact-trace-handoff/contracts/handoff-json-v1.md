@@ -34,8 +34,10 @@ Exactly `source` then `file`.
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `source` | string | Capture source already stored on the summary |
+| `source` | string | Allowlisted capture source: `claude-code`, or `unknown` |
 | `file` | string | Filename only, never an absolute path |
+
+`source` MUST NOT be copied verbatim from an arbitrary envelope or summary string. Only the closed v1 allowlist member `claude-code` may appear as a concrete source. Every other value MUST be `unknown`.
 
 ## `sessions`
 
@@ -152,4 +154,4 @@ This example is synthetic. Do not copy real session identifiers, prompts, paths,
 
 ## Privacy
 
-Successful JSON may contain only the fields above. It never includes capture paths, session identifiers, prompt text, assistant text, tool arguments or results, source code, error payloads, or provider provenance beyond `usage_source`.
+Successful JSON may contain only the fields above. It never includes capture paths, session identifiers, prompt text, assistant text, tool arguments or results, source code, error payloads, arbitrary envelope `source` strings, or provider provenance beyond `usage_source` and the closed capture-source allowlist.

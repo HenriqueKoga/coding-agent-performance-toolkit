@@ -36,6 +36,18 @@ This Phase 0 note records v1 choices that the spec already pins. There are no re
 - **Rationale**: ADR 0005 keeps analysis on immutable summary evidence. The Issue requires core construction to be a transformation of the provider-neutral summary, not CLI-only filtering.
 - **Alternatives considered**: Rendering a subset of `TraceSummary` directly, or introducing an artifact registry. Rejected as CLI-only logic or a premature framework.
 
+## Capture source allowlist
+
+- **Decision**: Keep `capture.source` in v1, but map it through a closed allowlist in `handoff_from_summary()`. V1 members: `claude-code`. Any other string becomes `unknown`. Never echo the raw summary source when it is outside the list.
+- **Rationale**: Envelope `source` is currently any non-empty string. Calling that field "safe" without mapping would let a prompt, identifier, or secret into an agent-facing artifact. `unknown` already appears as the empty-source snapshot fallback. Omitting the key would break the fixed JSON contract.
+- **Alternatives considered**: Omitting `source`; importing the Claude Code adapter `SOURCE` constant; changing CaptureReader. Rejected as either dropping Issue-requested identity, coupling the domain to an adapter, or changing existing summarize/compare behavior.
+
+## Handoff error mapping
+
+- **Decision**: Call `summarize_capture()` from the handoff command, then map `CaptureError`/`OSError` to payload-free stderr. Do not reuse `summarize_or_fail()` for handoff. Do not change `CaptureError` or summarize/compare errors.
+- **Rationale**: `CaptureError` currently interpolates unsupported `schema_version` into the message. Reusing that helper would violate FR-013 for an agent-facing command. Sanitizing globally would change existing summarize/compare output.
+- **Alternatives considered**: Changing `capture.py` error text; documenting the leak as acceptable. Rejected as a compatibility change or a privacy hole.
+
 ## Unresolved items
 
 None. Human review is still required before Issue #37 receives `agent:ready`.

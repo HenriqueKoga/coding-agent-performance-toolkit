@@ -16,7 +16,7 @@
 
 A developer has one local CAPT JSONL capture from a long-running coding-agent session. They want a compact evidence handoff that another agent or a later local workflow can consume, without re-reading the capture, reconstructing intent, or sending data anywhere.
 
-The handoff is an evidence extract, not a narrative. It reports only a small allowlisted subset of the existing summary: safe capture identity, key session/tool/model aggregates, and the deterministic insights already computed for that capture.
+The handoff is an evidence extract, not a narrative. It reports only a small allowlisted subset of the existing summary: filename plus allowlisted capture source, key session/tool/model aggregates, and the deterministic insights already computed for that capture.
 
 **Why this priority**: This is the first Preserve Context slice. It turns already-safe summary evidence into a smaller, machine-consumable artifact so a later optional layer or another coding agent can continue from facts rather than from invented goals or source-code context.
 
@@ -51,7 +51,9 @@ JSON is the canonical structured representation. Text output is the human-readab
 - The capture is valid but empty or minimal: no sessions, no tool calls, no model usage, and no insight findings.
 - Insight arrays are empty and singleton insight fields are `null`; the insights object is still present.
 - Tool success rate is `null` because there are no tool calls; the field remains present as `null` rather than `0`.
-- Capture identity is the existing safe filename and source only; an absolute input path must not appear in successful output or error text.
+- Capture identity is a filename plus an allowlisted source; an absolute input path must not appear in successful output or error text.
+- A valid capture whose envelope `source` is an arbitrary string still produces a handoff, but `capture.source` is the closed sentinel `unknown` rather than the raw string.
+- An invalid envelope whose `schema_version` is an attacker-controlled string fails with a fixed unsupported-schema reason; the raw value does not appear on stderr.
 - The command is invoked with no capture path, more than one capture path, or `--latest`.
 - The operator redirects stdout to a file; v1 does not add a dedicated `--output` flag.
 
@@ -70,29 +72,29 @@ JSON is the canonical structured representation. Text output is the human-readab
   5. tool aggregates: `calls`, `successes`, `failures`, `result_bytes`, `success_rate_bps`
   6. insights: the existing insight findings object, using the same keys and per-finding fields already emitted by `capt trace summarize`
 - **FR-005**: `schema_version` MUST be integer `1` and MUST be independent from the trace-summary schema version.
-- **FR-006**: `capture.file` MUST remain a filename only. `sessions.prompts` and `sessions.assistant_responses` MUST remain integer counts. They MUST NEVER include prompt text, assistant text, or other content.
+- **FR-006**: `capture.file` MUST remain a filename only. `capture.source` MUST be mapped through a closed allowlist of CAPT capture-source identifiers. V1 allows only `claude-code`. Any other summary source, including an arbitrary or secret-looking string, MUST be emitted as `unknown` and MUST NOT appear in output. `sessions.prompts` and `sessions.assistant_responses` MUST remain integer counts. They MUST NEVER include prompt text, assistant text, or other content.
 - **FR-007**: Insights MUST be copied from the existing summary findings. CAPT MUST NOT rephrase, score, rank, filter, or add narrative around those findings.
 - **FR-008**: The handoff MUST NOT invent goals, decisions, TODOs, source-code context, recommendations, quality judgments, or a next-action section.
 - **FR-009**: JSON MUST be the canonical structured representation. Text MUST expose the same evidence values and insight presence/absence as JSON. Text MUST follow the existing `--format text|json` CLI convention, with `text` as the default and `json` as the structured form. Markdown is not a v1 format.
 - **FR-010**: Output MUST be deterministic for the same capture: stable field order, stable insight order already defined by summarization, and no non-deterministic timestamps or path materialization.
 - **FR-011**: By default, CAPT MUST print the handoff to stdout. V1 MUST NOT add a file-output flag. Operators who need a file may redirect stdout.
 - **FR-012**: The command MUST be local-only and read-only. It MUST NOT persist handoff state, bind a network port, or send data externally.
-- **FR-013**: Invalid input MUST exit non-zero with concise error text, no traceback, no payload contents, and no absolute path disclosure.
+- **FR-013**: Invalid input MUST exit non-zero with concise error text, no traceback, no payload contents, and no absolute path disclosure. Handoff error text MUST NOT interpolate envelope field values. In particular, an unsupported `schema_version` MUST use a fixed reason that omits the raw value. The handoff command MUST NOT reuse `summarize_or_fail()` if that helper would print those values. Existing summarize and compare error text MUST remain unchanged.
 - **FR-014**: Existing `trace summarize`, `trace compare`, `trace list`, collection, summary JSON schema/version, comparison JSON schema/version, and insight behavior MUST remain unchanged.
 - **FR-015**: The handoff JSON contract MUST use exactly the top-level keys and nested allowlist defined in `plan.md`. No additional top-level or nested fields are permitted in v1, including activity, coverage, duration percentiles, cache-token totals, per-model breakdowns, per-tool `by_name` rows, envelope counts, received-at timestamps, comparison-availability metadata, identifiers, paths, payloads, or invented narrative fields.
 
 ### Key Entities
 
-- **TraceHandoff**: Immutable provider-neutral compact evidence extract produced from one `TraceSummary`. It contains only the allowlisted identity, aggregate, and insight fields. It does not contain capture paths, prompt or response content, tool arguments or results, source code, scores, or recommendations.
+- **TraceHandoff**: Immutable provider-neutral compact evidence extract produced from one `TraceSummary`. It contains only the allowlisted identity, aggregate, and insight fields. Capture `source` is allowlisted or `unknown`. It does not contain capture paths, prompt or response content, tool arguments or results, source code, scores, or recommendations.
 - **HandoffInsights**: The existing summary insight findings, carried unchanged into the handoff. Empty arrays and `null` singleton findings remain explicit.
 
 ## CAPT constraints *(mandatory)*
 
 ### Privacy
 
-- Successful output may contain only the compact allowlist in FR-004: safe capture `source` and filename, integer session/tool/model aggregates, `usage_source`, nullable tool success-rate basis points, and existing insight evidence fields (including already-allowlisted tool names).
-- Do not emit capture paths, session identifiers, prompt text, assistant text, tool arguments/results, source-code snippets, error payloads, secrets, model payloads, raw telemetry, or provider-specific provenance beyond the existing `usage_source` enumeration.
-- Input-error messages may use a safe basename if necessary, consistent with current summarization errors, but must never include an absolute path or payload content.
+- Successful output may contain only the compact allowlist in FR-004: allowlisted capture `source` (`claude-code` or `unknown`), filename, integer session/tool/model aggregates, `usage_source`, nullable tool success-rate basis points, and existing insight evidence fields (including already-allowlisted tool names).
+- Do not emit capture paths, session identifiers, prompt text, assistant text, tool arguments/results, source-code snippets, error payloads, secrets, model payloads, raw telemetry, arbitrary envelope `source` strings, or provider-specific provenance beyond the existing `usage_source` enumeration and the closed capture-source allowlist.
+- Input-error messages may use a safe basename if necessary, but must never include an absolute path, payload content, or interpolated envelope field values such as `schema_version`. Handoff may be stricter than existing summarize errors.
 - Tests, fixtures, and this specification use synthetic data only.
 
 ### Deterministic evidence
@@ -112,7 +114,7 @@ JSON is the canonical structured representation. Text output is the human-readab
 ### Provider neutrality
 
 - Handoff construction consumes the provider-neutral `TraceSummary` only.
-- No new Claude Code-specific mapping, event name, or adapter branch is permitted.
+- No new Claude Code-specific event-name mapping or adapter import is permitted. The capture-source allowlist is a closed identity sanitizer in the handoff layer; v1 contains `claude-code` because that is the only source CAPT currently persists.
 - `usage_source` remains the existing provider-neutral enumeration already used by summaries.
 
 ### Compatibility
@@ -153,14 +155,16 @@ uv run ty check
 uv run pytest
 uv build --clear
 git diff --check
+uv run capt trace handoff tests/fixtures/claude_code/synthetic-capture.jsonl
+uv run capt trace handoff tests/fixtures/claude_code/synthetic-capture.jsonl --format json
 ```
 
-Plus focused tests covering deterministic JSON/text content, empty and minimal traces, insight inclusion and absence, privacy exclusions (sensitive/raw payload strings cannot appear), text/JSON agreement, CLI arity and input errors, and unchanged existing summarize/compare output.
+Plus focused tests covering deterministic JSON/text content, empty and minimal traces, insight inclusion and absence, arbitrary-source mapping to `unknown`, privacy exclusions (sensitive/raw payload strings cannot appear, including envelope `schema_version` on stderr), text/JSON agreement, CLI arity and input errors, synthetic text/JSON smoke invocations, and unchanged existing summarize/compare output.
 
 ### Human decisions
 
 - Human approval is required before the operational Issue receives `agent:ready`.
-- This specification pins the v1 compact allowlist, `capt trace handoff` command name, stdout-only output, and text-default / JSON-canonical format split. It does not approve prompts, responses, source-code capture, remote storage, persistence, a model API, `--latest`, dedicated file output, Markdown, or a generic artifact framework.
+- This specification pins the v1 compact allowlist, `capt trace handoff` command name, stdout-only output, text-default / JSON-canonical format split, closed capture-source allowlist (`claude-code` or `unknown`), and handoff-specific payload-free error mapping. It does not approve prompts, responses, source-code capture, remote storage, persistence, a model API, `--latest`, dedicated file output, Markdown, a generic artifact framework, or changing existing summarize/compare error text.
 - Stop for human review if useful handoff output would require prompts, responses, source-code capture, remote storage, or model inference.
 - Spec Kit must not apply lifecycle or risk labels.
 
@@ -168,9 +172,9 @@ Plus focused tests covering deterministic JSON/text content, empty and minimal t
 
 ### Measurable Outcomes
 
-- **SC-001**: A reviewer can predict every handoff field from the existing summary of the same capture without running a model.
+- **SC-001**: A reviewer can predict every handoff field from the existing summary of the same capture without running a model, except `capture.source`, which is the allowlisted mapping of the summary source (`claude-code` or `unknown`).
 - **SC-002**: Text and JSON expose the same compact identity, aggregate values, and insight presence/absence.
-- **SC-003**: Successful handoff output contains no input paths, identifiers, prompt or response content, tool payloads, source-code snippets, or invented narrative fields.
+- **SC-003**: Successful handoff output contains no input paths, identifiers, prompt or response content, tool payloads, source-code snippets, invented narrative fields, or raw capture-source strings outside the closed allowlist.
 - **SC-004**: Repeating the command on the same capture produces identical output for a given format.
 - **SC-005**: Handoff memory use does not scale with raw capture size beyond existing bounded summarization behavior.
 - **SC-006**: Existing `capt trace summarize` and `capt trace compare` public text/JSON contracts and schema versions remain unchanged.
@@ -179,7 +183,8 @@ Plus focused tests covering deterministic JSON/text content, empty and minimal t
 ## Assumptions
 
 - Issue #36 comparison has already landed, so this feature can reuse `summarize_capture()` and existing insights without changing those contracts.
-- `TraceSummary` remains the canonical immutable result of capture summarization.
+- Existing summarize output may still echo a raw envelope `source`, and existing summarize/compare errors may still interpolate `schema_version`. This feature sanitizes those only on the handoff path.
+- `TraceSummary` remains the canonical immutable result of capture summarization. The handoff source allowlist is applied while copying identity fields.
 - Copying existing insight findings into a smaller document is sufficient for the first Preserve Context slice; a later Context Ledger or resume workflow is a separate specification.
 - Stdout redirection is sufficient file persistence for v1; a dedicated `--output` flag would be a later additive command change.
 - Defaulting to `text` while documenting JSON as the canonical structured contract matches `summarize` and `compare` and does not make JSON optional.

@@ -19,8 +19,8 @@ capt trace handoff CAPTURE [--format text|json]
 1. **Minimal capture**: summarize and handoff a synthetic capture with no sessions, tools, or model usage. JSON still has every v1 key. `tools.success_rate_bps` is `null`. All insight arrays are empty and singleton insights are `null`. No goals or TODOs appear.
 2. **Insight capture**: use a synthetic capture that already produces repeated-tool, compaction-pressure, or other summarize findings. Handoff insights must match summarize insights field-for-field.
 3. **Determinism**: run the same command twice for `text` and twice for `json`. Outputs are identical.
-4. **Privacy**: fixtures that contain synthetic prompt/tool/path strings in raw envelopes must not leak those strings into handoff stdout or stderr.
-5. **Errors**: missing file, invalid capture, and missing argument exit non-zero with no traceback, payload, or absolute path.
+4. **Privacy**: fixtures that contain synthetic prompt/tool/path strings in raw envelopes must not leak those strings into handoff stdout or stderr. An arbitrary envelope `source` becomes `unknown`. An unsupported `schema_version` marker string must not appear on stderr.
+5. **Errors**: missing file, invalid capture, missing argument, and unsupported schema_version exit non-zero with no traceback, payload, interpolated envelope value, or absolute path.
 6. **Compatibility**: `capt trace summarize` and `capt trace compare` output for the same fixtures remains unchanged.
 
 ## Expected validation
@@ -34,6 +34,8 @@ uv run pytest
 uv build --clear
 git diff --check
 uv run capt trace handoff --help
+uv run capt trace handoff tests/fixtures/claude_code/synthetic-capture.jsonl
+uv run capt trace handoff tests/fixtures/claude_code/synthetic-capture.jsonl --format json
 ```
 
-Use synthetic fixture paths from the implementation tests, not real captures.
+The text and JSON smoke invocations must succeed against that synthetic fixture and must not print prompt, tool-payload, identifier, or absolute-path strings from the capture. Use additional synthetic fixture paths from the implementation tests, not real captures.
