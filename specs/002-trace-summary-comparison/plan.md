@@ -1,65 +1,41 @@
 # Implementation Plan: Compare two trace summaries
 
-**Branch**: `002-trace-summary-comparison` | **Date**: 2026-08-17 | **Spec**: [spec.md](./spec.md)
+**Branch**: `002-trace-summary-comparison` | **Date**: 2026-08-18 | **Spec**: [spec.md](./spec.md)
 
-**Input**: Feature specification from `/specs/002-trace-summary-comparison/spec.md`
+**Input**: `/specs/002-trace-summary-comparison/spec.md`
 
 **Note**: Specification-phase plan only. Implementation enters the existing GitHub lifecycle through Issue #36 after human approval; do not run `/speckit.implement`.
 
 ## Summary
 
-Add `capt trace compare BASELINE CANDIDATE` as a local deterministic comparison command. Each capture is summarized independently through the existing bounded-memory path. Aggregation must preserve fixed-size provider-neutral availability for the eight comparison metrics so missing telemetry is never treated as observed zero. A small comparison layer consumes immutable summary values plus that availability and produces eight fixed comparison slots. Rendering remains text/JSON presentation only.
+Add `capt trace compare BASELINE CANDIDATE` as a local deterministic comparison command. Each distinct capture is summarized through the existing bounded-memory path. Aggregation preserves fixed-size provider-neutral availability for the eight comparison metrics so missing telemetry is never treated as observed zero. A pure comparison layer produces eight fixed slots and text/JSON rendering exposes only allowlisted evidence.
+
+If baseline and candidate resolve to the same filesystem object, summarize it exactly once and reuse that immutable snapshot for both sides. This preserves the explicit same-file zero-delta guarantee even if the capture is still being appended concurrently.
 
 ## Technical Context
 
-**Language/Version**: Python 3.14
-
-**Primary Dependencies**: Existing CAPT runtime only. No new package.
-
-**Storage**: Existing local JSONL captures; no comparison persistence
-
-**Testing**: `uv run pytest` with synthetic capture fixtures
-
-**Target Platform**: Local CLI (Linux/macOS/Windows)
-
-**Project Type**: local-first CLI
-
-**Performance Goals**: Preserve incremental bounded-memory summarization for each input; availability and comparison state are fixed-size
-
-**Constraints**: Local-first, deterministic-first, privacy allowlist, provider-neutral core, no required LLM
-
-**Scale/Scope**: Exactly two explicit capture inputs per invocation
+- Python 3.14
+- Existing CAPT runtime only; no new package
+- Local JSONL inputs; no comparison persistence
+- Synthetic tests with `uv run pytest`
+- Fixed-size availability/comparison state
 
 ## Constitution Check
 
-- [x] Local-first: no outbound user-data path or public bind
-- [x] Deterministic-first: unavailable telemetry is not converted into evidence
-- [x] Privacy: comparison result excludes payloads, identifiers, paths, and provider-specific provenance
-- [x] Provider-neutral core; no adapter changes planned
-- [x] Streaming / bounded memory preserved for both inputs
-- [x] No required LLM or model API in core
-- [x] Existing trace-summary public schema/version stays compatible
-- [x] No registry, ABC, plugin system, or experiment framework
+- [x] Local-first; no outbound data
+- [x] Deterministic-first; unavailable telemetry is not converted into evidence
+- [x] Privacy allowlist; no paths, identifiers, payloads, or provider-specific provenance in output
+- [x] Provider-neutral aggregation/comparison
+- [x] Bounded-memory summarization preserved
+- [x] Existing trace-summary public schema/version remains unchanged
+- [x] No LLM, registry, plugin system, experiment framework, or new dependency
 - [x] Human approval required before `agent:ready`
-- [x] Implementation will enter GitHub through existing Issue #36, not `/speckit.implement`
 
-## CAPT design notes
+## Availability boundary
 
-- **Privacy impact**: two user-selected local paths are read. Do not serialize those paths; errors stay basename-only where necessary.
-- **Deterministic evidence**: each of the eight slots has explicit availability; `delta = candidate - baseline` only when both sides are available.
-- **Bounded-memory impact**: availability uses fixed-size flags/counters in existing accumulators; no raw record retention.
-- **Provider neutrality**: provider adapters continue to normalize records; availability is derived in provider-neutral aggregation.
-- **Compatibility**: new `capt trace compare` command. Existing `trace summarize` text/JSON and `TraceSummary.schema_version` remain unchanged.
-- **Validation**: full repository checks plus focused availability, CLI, and rendering tests.
-- **Out of scope**: summary-JSON inputs, latest discovery, configurable metric lists, percentages, scores, recommendations, experiments, persistence.
+The current final numeric aggregates cannot always distinguish observed zero from missing telemetry. Add the smallest fixed-size provider-neutral availability state required by the eight slots during existing aggregation.
 
-## Proposed design
-
-### Availability boundary
-
-The current final numeric aggregates are insufficient to distinguish observed zero from missing telemetry. Add the smallest provider-neutral availability state needed by the eight comparison metrics during existing aggregation.
-
-Preferred shape is an immutable fixed-size value attached to the internal summary domain model, for example:
+Preferred shape:
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -74,27 +50,21 @@ class ComparisonAvailability:
     session_compactions: bool
 ```
 
-Exact naming may follow existing report/accumulator conventions. Do not implement this as a dict, registry, dynamic field discovery, or provider-specific structure.
+Exact naming may follow existing report/accumulator conventions. Do not use a dict, registry, dynamic discovery, or provider-specific structure.
 
-Availability must be produced from normalized evidence, not from `value != 0`. The implementation must cover these semantics:
+Availability rules:
 
-- `model_requests`: available only when request-count evidence is actually observed; metrics-only/no-usage fallback must not imply zero requests.
-- `estimated_cost_usd_micros`, `input_tokens`, `output_tokens`: independently available only when the relevant API-event field or OTEL metric series is observed sufficiently to produce a complete aggregate.
-- `tool_calls` and `tool_failures`: available only when tool-event telemetry coverage is observed; metrics-only captures must not imply zero tool activity.
-- `tool_result_bytes`: available only when tool-event coverage exists and required result-size evidence is complete for the counted calls.
-- `session_compactions`: available only when the relevant normalized lifecycle/log telemetry coverage is observed; metrics-only captures must not imply zero compactions.
+- `model_requests`: only when request-count evidence is observed; metrics-only/no-usage fallback must not imply zero.
+- cost/input/output tokens: independently available only when their own evidence is observed sufficiently for a complete aggregate.
+- tool calls/failures: only with observed tool-event telemetry coverage.
+- tool result bytes: only when tool coverage exists and result-size evidence is complete for counted calls.
+- compactions: only with relevant normalized lifecycle/log telemetry coverage.
 
-The existing `trace summarize` renderer must continue to ignore this internal availability metadata so its public output/schema version remains unchanged.
+Existing `trace summarize` rendering must ignore this internal metadata so its public contract remains unchanged.
 
-### Core comparison boundary
+## Core comparison boundary
 
-Create a small provider-neutral module, preferably:
-
-```text
-src/coding_agent_performance/trace/comparison.py
-```
-
-Preferred result shape:
+Prefer `src/coding_agent_performance/trace/comparison.py` with one concrete repeated invariant:
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -117,16 +87,13 @@ class TraceComparison:
     session_compactions: MetricComparison
 ```
 
-For each slot:
+Both sides available -> integer values and `delta = candidate - baseline`.
 
-- both sides available -> `available=True`, integer baseline/candidate, exact integer delta;
-- either side unavailable -> `available=False`, `delta=None`; use `None` for unavailable side values and never substitute zero.
+Either side unavailable -> fixed slot remains present, `available=False`, and no numeric delta. Never substitute zero for unavailable evidence.
 
-A single small `MetricComparison` abstraction is justified because the same invariant applies to all eight fixed slots. Do not introduce metric registries, generic schemas, protocols, plugin systems, or dynamic field discovery.
+## CLI orchestration
 
-### CLI orchestration
-
-Extend `src/coding_agent_performance/trace/cli.py` with:
+Add:
 
 ```text
 capt trace compare BASELINE CANDIDATE [--format text|json]
@@ -135,41 +102,34 @@ capt trace compare BASELINE CANDIDATE [--format text|json]
 The command should:
 
 1. receive two explicit `Path` arguments;
-2. summarize baseline through existing `summarize_capture()`;
-3. summarize candidate through existing `summarize_capture()`;
-4. call the pure comparison function;
-5. render text or JSON;
-6. map capture/OSError failures to concise non-zero CLI errors without tracebacks.
+2. determine whether both paths resolve to the same filesystem object without exposing resolved absolute paths in output;
+3. if they are the same object, call `summarize_capture()` once and reuse that immutable summary for baseline and candidate;
+4. otherwise summarize each input independently through existing `summarize_capture()`;
+5. call the pure comparison function;
+6. render text or JSON;
+7. map input/OSError failures to concise non-zero errors without traceback or absolute-path disclosure.
 
-If current summarize error handling would otherwise be copied substantially, extract only a small local helper that preserves current behavior for `summarize` and `compare`.
+Use standard filesystem identity semantics suitable for existing platform support (`Path.samefile()` or an equivalently safe approach) while handling nonexistent/unreadable inputs through the established error path. Do not compare path strings only, because aliases/symlinks may reference the same object.
 
-### Rendering
+If summarize error handling would otherwise be meaningfully duplicated, extract only a small local helper that preserves existing behavior.
 
-Rendering consumes `TraceComparison`, never raw captures or provider records. Text and JSON preserve the fixed metric order and explicitly distinguish unavailable slots.
+## Rendering
 
-Suggested JSON contract:
+Text and JSON consume only `TraceComparison` and preserve fixed metric order.
+
+Suggested JSON slot forms:
 
 ```json
-{
-  "schema_version": 1,
-  "metrics": {
-    "tool_calls": {"available": true, "baseline": 10, "candidate": 8, "delta": -2},
-    "tool_failures": {"available": true, "baseline": 2, "candidate": 1, "delta": -1},
-    "tool_result_bytes": {"available": false, "baseline": null, "candidate": null, "delta": null},
-    "model_requests": {"available": true, "baseline": 5, "candidate": 4, "delta": -1},
-    "estimated_cost_usd_micros": {"available": true, "baseline": 300000, "candidate": 250000, "delta": -50000},
-    "input_tokens": {"available": true, "baseline": 2000, "candidate": 1800, "delta": -200},
-    "output_tokens": {"available": true, "baseline": 900, "candidate": 950, "delta": 50},
-    "session_compactions": {"available": false, "baseline": null, "candidate": null, "delta": null}
-  }
-}
+{"available": true, "baseline": 10, "candidate": 8, "delta": -2}
+```
+
+```json
+{"available": false, "baseline": null, "candidate": null, "delta": null}
 ```
 
 The comparison schema version is independent from `TraceSummary.schema_version`.
 
-## Project Structure
-
-Expected implementation touch points after inspection:
+## Expected implementation touch points
 
 ```text
 src/coding_agent_performance/trace/report.py
@@ -177,17 +137,30 @@ src/coding_agent_performance/trace/summary.py
 src/coding_agent_performance/trace/comparison.py
 src/coding_agent_performance/trace/cli.py
 src/coding_agent_performance/trace/rendering.py
+existing accumulator modules as required
 docs/product.md
 docs/architecture.md
 docs/summary-format.md
 tests/test_comparison.py
-tests/test_cli.py
+existing CLI/summary tests
 ```
 
-Accumulator modules may also change where availability must be recorded. Keep those changes local to existing accumulator responsibilities.
+Keep availability state inside existing accumulator responsibilities. No package-level architecture change.
 
-**Structure Decision**: Extend existing accumulator/domain boundaries with fixed-size availability and add one cohesive pure comparison module. No package-level architecture change.
+## Validation
+
+```bash
+uv sync --frozen --all-groups
+uv run ruff format --check .
+uv run ruff check .
+uv run ty check
+uv run pytest
+uv build --clear
+git diff --check
+```
+
+Focused validation must cover observed-zero versus unavailable telemetry, partial coverage, mixed availability, same-file snapshot reuse, aliases/symlinks where portable, text/JSON agreement, privacy, and unchanged existing trace-summary rendering.
 
 ## Complexity Tracking
 
-The only intentional scope increase from the original draft is additive internal availability metadata required to prevent false evidence. Existing public trace-summary schema and behavior remain unchanged.
+The intentional scope increase from the initial draft is limited to fixed-size internal availability metadata and same-file snapshot reuse. Both are required to prevent false deterministic evidence; neither changes the existing trace-summary public schema.
