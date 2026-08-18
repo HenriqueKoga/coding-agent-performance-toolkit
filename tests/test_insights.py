@@ -607,6 +607,10 @@ def test_detect_compaction_pressure_zero_sessions() -> None:
     assert detect_compaction_pressure(_sessions(compactions=0, count=0)) is None
 
 
+def test_detect_compaction_pressure_zero_sessions_even_at_threshold() -> None:
+    assert detect_compaction_pressure(_sessions(compactions=COMPACTION_PRESSURE_THRESHOLD, count=0)) is None
+
+
 def test_detect_compaction_pressure_below_threshold() -> None:
     assert detect_compaction_pressure(_sessions(compactions=COMPACTION_PRESSURE_THRESHOLD - 1)) is None
 

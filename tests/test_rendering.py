@@ -1241,6 +1241,20 @@ def test_compaction_pressure_not_present_below_threshold() -> None:
     assert parsed["insights"]["compaction_pressure"] is None
 
 
+def test_compaction_pressure_not_present_without_session_identifiers() -> None:
+    summary = _finish_records(
+        _compaction_event(1, session_id=None),
+        _compaction_event(2, session_id=None),
+        filename="compaction-no-session.jsonl",
+    )
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert summary.sessions.count == 0
+    assert summary.sessions.compactions == 2
+    assert "Compaction pressure" not in text
+    assert parsed["insights"]["compaction_pressure"] is None
+
+
 def test_compaction_pressure_at_threshold_in_json_output() -> None:
     parsed = json.loads(
         render_json(

@@ -122,10 +122,12 @@ def detect_dominant_tool(tools: ToolStats) -> DominantTool | None:
 def detect_compaction_pressure(sessions: SessionStats) -> CompactionPressure | None:
     """Identify compaction pressure from the existing session aggregate.
 
-    Emits a finding when `sessions.compactions` meets
-    `COMPACTION_PRESSURE_THRESHOLD`. Evidence is the observed count only.
+    Emits a finding when the capture has at least one session and
+    `sessions.compactions` meets `COMPACTION_PRESSURE_THRESHOLD`. Evidence is
+    the observed count only. Zero sessions produce no finding even if the
+    compaction count meets the threshold.
     """
-    if sessions.compactions < COMPACTION_PRESSURE_THRESHOLD:
+    if sessions.count == 0 or sessions.compactions < COMPACTION_PRESSURE_THRESHOLD:
         return None
     return CompactionPressure(compaction_count=sessions.compactions)
 

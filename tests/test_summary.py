@@ -400,14 +400,14 @@ def test_high_tool_failure_rate_uses_explicit_success_outcome(tmp_path: Path) ->
         assert marker not in payload
 
 
-def _compaction_records(count: int, *, session_id: str = "session-test") -> list[dict[str, object]]:
-    return [
-        log_record(
-            event_name="compaction",
-            attributes={"session.id": session_id, "event.sequence": index + 1},
-        )
-        for index in range(count)
-    ]
+def _compaction_records(count: int, *, session_id: str | None = "session-test") -> list[dict[str, object]]:
+    records: list[dict[str, object]] = []
+    for index in range(count):
+        attributes: dict[str, object] = {"event.sequence": index + 1}
+        if session_id is not None:
+            attributes["session.id"] = session_id
+        records.append(log_record(event_name="compaction", attributes=attributes))
+    return records
 
 
 def test_compaction_pressure_absent_below_threshold(tmp_path: Path) -> None:
@@ -477,3 +477,19 @@ def test_compaction_pressure_omits_identifiers_and_payloads(tmp_path: Path) -> N
         assert marker not in payload
     parsed = json.loads(payload)
     assert parsed["insights"]["compaction_pressure"] == {"compaction_count": 2}
+
+
+def test_compaction_pressure_absent_without_session_identifiers(tmp_path: Path) -> None:
+    path = tmp_path / "compaction-no-session.jsonl"
+    path.write_text(
+        json.dumps(envelope(signal="logs", payload=resource_logs(_compaction_records(2, session_id=None)))) + "\n",
+        encoding="utf-8",
+    )
+    summary = summarize_capture(path)
+    assert summary.sessions.count == 0
+    assert summary.sessions.compactions == 2
+    assert summary.insights.compaction_pressure is None
+    text = render_text(summary)
+    parsed = json.loads(render_json(summary))
+    assert "Compaction pressure" not in text
+    assert parsed["insights"]["compaction_pressure"] is None
