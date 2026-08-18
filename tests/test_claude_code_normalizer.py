@@ -52,6 +52,9 @@ def test_normalizes_api_request() -> None:
     assert record.duration_ms == 900
     assert record.input_tokens == 400
     assert record.estimated_cost_usd_micros == 5000
+    assert record.has_input_tokens is True
+    assert record.has_output_tokens is True
+    assert record.has_estimated_cost_usd_micros is True
     assert record.session_id == SESSION
     assert not hasattr(record, "user.email")
 
@@ -69,8 +72,10 @@ def test_non_finite_cost_usd_is_zero() -> None:
     nan_text = normalize_log(_log("api_request", model="m", cost_usd="NaN"))
     assert isinstance(infinite, ModelRequest)
     assert infinite.estimated_cost_usd_micros == 0
+    assert infinite.has_estimated_cost_usd_micros is False
     assert isinstance(nan_text, ModelRequest)
     assert nan_text.estimated_cost_usd_micros == 0
+    assert nan_text.has_estimated_cost_usd_micros is False
 
 
 def test_cost_fallback_uses_decimal() -> None:
@@ -123,10 +128,12 @@ def test_tool_success_and_failure_drop_content() -> None:
     )
     assert isinstance(success, ToolExecution)
     assert success.success is True
+    assert success.success_valid is True
     assert success.input_size_bytes == 200
     assert BASH_COMMAND not in repr(success)
     assert isinstance(failure, ToolExecution)
     assert failure.success is False
+    assert failure.success_valid is True
     assert failure.error_type == "ShellError"
     assert ERROR_TEXT not in repr(failure)
 
@@ -189,6 +196,38 @@ def test_extreme_cost_usd_is_zero() -> None:
     record = normalize_log(_log("api_request", model="m", cost_usd="1e999999"))
     assert isinstance(record, ModelRequest)
     assert record.estimated_cost_usd_micros == 0
+    assert record.has_estimated_cost_usd_micros is False
+
+
+def test_explicit_zero_usage_fields_remain_present() -> None:
+    record = normalize_log(_log("api_request", model="m", input_tokens=0, output_tokens=0, cost_usd_micros=0))
+    assert isinstance(record, ModelRequest)
+    assert record.input_tokens == 0
+    assert record.output_tokens == 0
+    assert record.estimated_cost_usd_micros == 0
+    assert record.has_input_tokens is True
+    assert record.has_output_tokens is True
+    assert record.has_estimated_cost_usd_micros is True
+
+
+def test_partial_api_usage_fields_preserve_independent_presence() -> None:
+    record = normalize_log(_log("api_request", model="m", input_tokens=4, cost_usd="0.000012"))
+    assert isinstance(record, ModelRequest)
+    assert record.input_tokens == 4
+    assert record.output_tokens == 0
+    assert record.estimated_cost_usd_micros == 12
+    assert record.has_input_tokens is True
+    assert record.has_output_tokens is False
+    assert record.has_estimated_cost_usd_micros is True
+
+
+def test_invalid_input_and_output_tokens_are_absent() -> None:
+    record = normalize_log(_log("api_request", model="m", input_tokens="n/a", output_tokens=False))
+    assert isinstance(record, ModelRequest)
+    assert record.input_tokens == 0
+    assert record.output_tokens == 0
+    assert record.has_input_tokens is False
+    assert record.has_output_tokens is False
 
 
 def test_cost_and_coercion_edges() -> None:
@@ -196,8 +235,12 @@ def test_cost_and_coercion_edges() -> None:
     invalid = normalize_log(_log("api_request", model="m", cost_usd="not-a-number"))
     assert isinstance(missing, ModelRequest)
     assert missing.estimated_cost_usd_micros == 0
+    assert missing.has_estimated_cost_usd_micros is False
+    assert missing.has_input_tokens is False
+    assert missing.has_output_tokens is False
     assert isinstance(invalid, ModelRequest)
     assert invalid.estimated_cost_usd_micros == 0
+    assert invalid.has_estimated_cost_usd_micros is False
     typed = normalize_log(
         _log(
             "tool_result",
@@ -210,15 +253,22 @@ def test_cost_and_coercion_edges() -> None:
     )
     assert isinstance(typed, ToolExecution)
     assert typed.success is True
+    assert typed.success_valid is True
     assert typed.duration_ms == 10
     assert typed.input_size_bytes == 12
     assert typed.result_size_bytes is None
     failed = normalize_log(_log("tool_result", tool_name="Read", success="false"))
     assert isinstance(failed, ToolExecution)
     assert failed.success is False
+    assert failed.success_valid is True
     unknown_success = normalize_log(_log("tool_result", tool_name="Read", success="maybe"))
     assert isinstance(unknown_success, ToolExecution)
     assert unknown_success.success is True
+    assert unknown_success.success_valid is False
+    missing_success = normalize_log(_log("tool_result", tool_name="Read"))
+    assert isinstance(missing_success, ToolExecution)
+    assert missing_success.success is True
+    assert missing_success.success_valid is False
 
 
 def test_unknown_metric() -> None:

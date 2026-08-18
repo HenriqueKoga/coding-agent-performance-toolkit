@@ -3,7 +3,7 @@
 from collections.abc import Iterable
 from typing import Final
 
-from coding_agent_performance.trace.cost import usd_to_micros
+from coding_agent_performance.trace.cost import try_usd_to_micros
 from coding_agent_performance.trace.otel import DecodedOtlp, OtlpLogRecord, OtlpMetricPoint, OtlpValue
 from coding_agent_performance.trace.records import (
     ActivityMeasurement,
@@ -119,18 +119,24 @@ def _model_request(
     sequence: int | None,
 ) -> ModelRequest:
     model = _optional_str(attrs.get("model")) or "unknown"
+    input_tokens = _as_int(attrs.get("input_tokens"))
+    output_tokens = _as_int(attrs.get("output_tokens"))
+    cost_micros, has_cost = _cost_micros(attrs)
     return ModelRequest(
         session_id=session_id,
         prompt_id=prompt_id,
         model=model,
         query_source=_optional_str(attrs.get("query_source")),
         duration_ms=_as_int(attrs.get("duration_ms")),
-        input_tokens=_as_int(attrs.get("input_tokens")) or 0,
-        output_tokens=_as_int(attrs.get("output_tokens")) or 0,
+        input_tokens=input_tokens or 0,
+        output_tokens=output_tokens or 0,
         cache_read_tokens=_as_int(attrs.get("cache_read_tokens")) or 0,
         cache_creation_tokens=_as_int(attrs.get("cache_creation_tokens")) or 0,
-        estimated_cost_usd_micros=_cost_micros(attrs),
+        estimated_cost_usd_micros=cost_micros,
         event_sequence=sequence,
+        has_input_tokens=input_tokens is not None,
+        has_output_tokens=output_tokens is not None,
+        has_estimated_cost_usd_micros=has_cost,
     )
 
 
@@ -140,28 +146,33 @@ def _tool_execution(
     prompt_id: str | None,
     sequence: int | None,
 ) -> ToolExecution:
+    success = _as_bool(attrs.get("success"))
     return ToolExecution(
         session_id=session_id,
         prompt_id=prompt_id,
         tool_name=_optional_str(attrs.get("tool_name")) or "unknown",
-        success=_as_bool(attrs.get("success")) is not False,
+        success=success is not False,
         duration_ms=_as_int(attrs.get("duration_ms")),
         input_size_bytes=_as_int(attrs.get("tool_input_size_bytes")),
         result_size_bytes=_as_int(attrs.get("tool_result_size_bytes")),
         error_type=_optional_str(attrs.get("error_type")),
         tool_use_id=_optional_str(attrs.get("tool_use_id")),
         event_sequence=sequence,
+        success_valid=success is not None,
     )
 
 
-def _cost_micros(attrs: dict[str, OtlpValue]) -> int:
+def _cost_micros(attrs: dict[str, OtlpValue]) -> tuple[int, bool]:
     micros = _as_int(attrs.get("cost_usd_micros"))
     if micros is not None:
-        return micros
+        return micros, True
     raw = attrs.get("cost_usd")
     if raw is None:
-        return 0
-    return usd_to_micros(raw)
+        return 0, False
+    converted = try_usd_to_micros(raw)
+    if converted is None:
+        return 0, False
+    return converted, True
 
 
 def _allowed_attributes(point: OtlpMetricPoint, allowed: tuple[str, ...]) -> MetricAttributes:

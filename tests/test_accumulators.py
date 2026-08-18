@@ -46,6 +46,7 @@ def test_accumulator_and_analyzer_modules_stay_provider_neutral() -> None:
     _assert_core_imports_are_provider_neutral(_TRACE_DIR / "accumulators.py")
     _assert_core_imports_are_provider_neutral(_TRACE_DIR / "insights.py")
     _assert_core_imports_are_provider_neutral(_TRACE_DIR / "aggregation.py")
+    _assert_core_imports_are_provider_neutral(_TRACE_DIR / "comparison.py")
 
 
 def test_tool_accumulator_snapshots_immutable_stats() -> None:

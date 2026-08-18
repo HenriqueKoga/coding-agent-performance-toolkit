@@ -119,6 +119,22 @@ def test_json_and_text_are_deterministic_and_private() -> None:
         assert marker not in payload
 
 
+def test_summary_json_omits_internal_comparison_availability() -> None:
+    payload = summary_to_dict(summarize_capture(FIXTURE_PATH))
+    assert "comparison_availability" not in payload
+    assert list(payload) == [
+        "schema_version",
+        "capture",
+        "sessions",
+        "model_usage",
+        "tools",
+        "activity",
+        "coverage",
+        "insights",
+    ]
+    assert "unavailable" not in render_text(summarize_capture(FIXTURE_PATH))
+
+
 def test_json_allowlist_keeps_v1_activity_keys() -> None:
     summary = summarize_capture(FIXTURE_PATH)
     payload = summary_to_dict(summary)

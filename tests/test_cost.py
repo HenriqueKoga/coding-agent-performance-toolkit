@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from coding_agent_performance.trace.cost import usd_to_micros
+from coding_agent_performance.trace.cost import try_usd_to_micros, usd_to_micros
 
 
 def test_decimal_usd_converts_to_micros() -> None:
@@ -35,3 +35,11 @@ def test_invalid_types_are_zero() -> None:
 
 def test_unparseable_value_is_zero() -> None:
     assert usd_to_micros("1e999999-hidden-cost") == 0
+
+
+def test_try_usd_to_micros_distinguishes_valid_zero_from_invalid() -> None:
+    assert try_usd_to_micros(0) == 0
+    assert try_usd_to_micros("0.0") == 0
+    assert try_usd_to_micros("not-a-number") is None
+    assert try_usd_to_micros(float("nan")) is None
+    assert try_usd_to_micros(None) is None

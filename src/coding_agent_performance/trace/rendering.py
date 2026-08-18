@@ -5,6 +5,7 @@ import unicodedata
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
+from coding_agent_performance.trace.comparison import COMPARISON_SCHEMA_VERSION, MetricComparison, TraceComparison
 from coding_agent_performance.trace.report import (
     CompactionPressure,
     DominantTool,
@@ -209,6 +210,58 @@ def _subagent_usage_dict(finding: SubagentUsage | None) -> dict[str, int] | None
 
 def render_json(summary: TraceSummary) -> str:
     return json.dumps(summary_to_dict(summary), indent=2, allow_nan=False, ensure_ascii=False)
+
+
+def comparison_to_dict(comparison: TraceComparison) -> dict[str, object]:
+    metrics = {
+        "tool_calls": _metric_comparison_dict(comparison.tool_calls),
+        "tool_failures": _metric_comparison_dict(comparison.tool_failures),
+        "tool_result_bytes": _metric_comparison_dict(comparison.tool_result_bytes),
+        "model_requests": _metric_comparison_dict(comparison.model_requests),
+        "estimated_cost_usd_micros": _metric_comparison_dict(comparison.estimated_cost_usd_micros),
+        "input_tokens": _metric_comparison_dict(comparison.input_tokens),
+        "output_tokens": _metric_comparison_dict(comparison.output_tokens),
+        "session_compactions": _metric_comparison_dict(comparison.session_compactions),
+    }
+    return {
+        "schema_version": COMPARISON_SCHEMA_VERSION,
+        "metrics": metrics,
+    }
+
+
+def _metric_comparison_dict(slot: MetricComparison) -> dict[str, bool | int | None]:
+    return {
+        "available": slot.available,
+        "baseline": slot.baseline,
+        "candidate": slot.candidate,
+        "delta": slot.delta,
+    }
+
+
+def render_comparison_json(comparison: TraceComparison) -> str:
+    return json.dumps(comparison_to_dict(comparison), indent=2, allow_nan=False, ensure_ascii=False)
+
+
+def render_comparison_text(comparison: TraceComparison) -> str:
+    return "\n".join(
+        [
+            "Comparison",
+            f"  tool_calls: {_metric_comparison_line(comparison.tool_calls)}",
+            f"  tool_failures: {_metric_comparison_line(comparison.tool_failures)}",
+            f"  tool_result_bytes: {_metric_comparison_line(comparison.tool_result_bytes)}",
+            f"  model_requests: {_metric_comparison_line(comparison.model_requests)}",
+            f"  estimated_cost_usd_micros: {_metric_comparison_line(comparison.estimated_cost_usd_micros)}",
+            f"  input_tokens: {_metric_comparison_line(comparison.input_tokens)}",
+            f"  output_tokens: {_metric_comparison_line(comparison.output_tokens)}",
+            f"  session_compactions: {_metric_comparison_line(comparison.session_compactions)}",
+        ]
+    )
+
+
+def _metric_comparison_line(slot: MetricComparison) -> str:
+    if not slot.available or slot.baseline is None or slot.candidate is None or slot.delta is None:
+        return "unavailable"
+    return f"{slot.baseline} → {slot.candidate} (delta {slot.delta})"
 
 
 def render_text(summary: TraceSummary) -> str:

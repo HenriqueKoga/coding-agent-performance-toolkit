@@ -25,7 +25,7 @@ from coding_agent_performance.trace.records import (
     UnknownMetric,
     UserPrompt,
 )
-from coding_agent_performance.trace.report import TraceSummary
+from coding_agent_performance.trace.report import ComparisonAvailability, TraceSummary
 
 SUMMARY_SCHEMA_VERSION: Final = 1
 
@@ -75,6 +75,28 @@ class IncrementalSummarizer:
             activity=self._metrics.activity_stats(),
             coverage=self._coverage.snapshot(),
             insights=InsightAnalyzer(tools=tools, sessions=sessions).analyze(),
+            comparison_availability=self._comparison_availability(),
+        )
+
+    def _comparison_availability(self) -> ComparisonAvailability:
+        has_tool_events = self._tools.calls > 0
+        if self._usage.requests > 0:
+            cost_available = self._usage.cost_complete
+            input_available = self._usage.input_complete
+            output_available = self._usage.output_complete
+        else:
+            cost_available = self._metrics.has_cost_usage()
+            input_available = self._metrics.has_token_usage("input")
+            output_available = self._metrics.has_token_usage("output")
+        return ComparisonAvailability(
+            tool_calls=has_tool_events,
+            tool_failures=has_tool_events and self._tools.success_complete,
+            tool_result_bytes=has_tool_events and self._tools.result_bytes_complete,
+            model_requests=self._usage.requests > 0,
+            estimated_cost_usd_micros=cost_available,
+            input_tokens=input_available,
+            output_tokens=output_available,
+            session_compactions=self._coverage.log_records > 0,
         )
 
     def _ingest(self, record: DomainRecord) -> None:

@@ -165,9 +165,18 @@ class UsageAccumulator:
     request_durations: list[int] = field(default_factory=list)
     by_model: dict[str, _ModelBucket] = field(default_factory=dict)
     by_query: dict[str, _QueryBucket] = field(default_factory=dict)
+    cost_complete: bool = True
+    input_complete: bool = True
+    output_complete: bool = True
 
     def add_request(self, record: ModelRequest) -> None:
         self.requests += 1
+        if not record.has_estimated_cost_usd_micros:
+            self.cost_complete = False
+        if not record.has_input_tokens:
+            self.input_complete = False
+        if not record.has_output_tokens:
+            self.output_complete = False
         self.event_cost += record.estimated_cost_usd_micros
         self.event_tokens = TokenTotals(
             input=self.event_tokens.input + record.input_tokens,
@@ -260,9 +269,15 @@ class ToolAccumulator:
     result_bytes: int = 0
     durations: list[int] = field(default_factory=list)
     by_name: dict[str, _ToolBucket] = field(default_factory=dict)
+    success_complete: bool = True
+    result_bytes_complete: bool = True
 
     def add(self, record: ToolExecution) -> None:
         self.calls += 1
+        if not record.success_valid:
+            self.success_complete = False
+        if record.result_size_bytes is None:
+            self.result_bytes_complete = False
         if record.success:
             self.successes += 1
         else:
@@ -339,6 +354,17 @@ class MetricAccumulator:
 
     def has_usage_metrics(self) -> bool:
         return any(key[0] in _USAGE_METRICS for key in self.series)
+
+    def has_cost_usage(self) -> bool:
+        return any(key[0] == "claude_code.cost.usage" for key in self.series)
+
+    def has_token_usage(self, token_type: str) -> bool:
+        for name, attrs, _start in self.series:
+            if name != "claude_code.token.usage":
+                continue
+            if _TOKEN_TYPES.get(dict(attrs).get("type", "")) == token_type:
+                return True
+        return False
 
     def total(self, name: str) -> int | float:
         value: int | float = 0
